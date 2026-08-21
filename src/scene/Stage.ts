@@ -98,6 +98,9 @@ export class Stage {
       void this.loadPineRunAssets();
     }
     this.buildCheckpoints();
+    if (this.checkpoints.length !== this.checkpointIndices.length) {
+      throw new Error("Stage checkpoint positions must include the finish gate.");
+    }
     if (this.id === "pine-run") this.buildMountains();
   }
 
@@ -135,6 +138,17 @@ export class Stage {
 
   tangent(index: number): Vector3 {
     return this.tangents[Math.max(0, Math.min(this.tangents.length - 1, index))];
+  }
+
+  surfaceGrip(index: number, side: number): number {
+    if (this.id === "silverstone") return Math.abs(side) > this.roadWidth - 0.7 ? 0.42 : 1;
+    if (Math.abs(side) > this.roadWidth - 0.7) return 0.4;
+
+    // The centre of a stage is usually compacted by prior cars; gravel gets
+    // looser towards the edge and varies modestly from one section to another.
+    const packedLine = 1 - Math.min(1, Math.abs(side) / this.roadWidth);
+    const sectionVariation = 0.94 + Math.sin(index * 0.19) * 0.035 + Math.sin(index * 0.047) * 0.025;
+    return (0.62 + packedLine * 0.14) * sectionVariation;
   }
 
   drawMinimap(canvas: HTMLCanvasElement, progress: number): void {
@@ -508,7 +522,7 @@ export class Stage {
     const bannerMaterial = new MeshStandardMaterial({ color: this.id === "silverstone" ? 0x24343c : 0x1f63ce, roughness: 0.65, side: DoubleSide });
     const poleHeight = this.id === "silverstone" ? 6.8 : 5.2;
     const bannerHeight = this.id === "silverstone" ? 0.58 : 0.85;
-    const indices = [0, ...this.checkpointIndices.filter((index) => index !== this.samples.length - 1)];
+    const indices = [0, ...this.checkpointIndices];
     indices.forEach((sampleIndex, checkpointIndex) => {
       const point = this.samples[sampleIndex];
       const normal = this.normals[sampleIndex];

@@ -18,6 +18,7 @@ import {
 } from "three";
 import { Input } from "./Input";
 import { FormulaDynamics } from "./FormulaDynamics";
+import { RallyDynamics } from "./RallyDynamics";
 import { RallyCar } from "../scene/Car";
 import { SpeedLines } from "../scene/SpeedLines";
 import { Stage } from "../scene/Stage";
@@ -40,19 +41,21 @@ export class Game {
   private readonly speedLines = new SpeedLines();
   private readonly hud: HUD;
   private readonly clock = new Clock();
-  private readonly velocity = new Vector3();
   private readonly right = new Vector3();
   private readonly forward = new Vector3();
   private readonly cameraGoal = new Vector3();
   private readonly lookGoal = new Vector3();
   private readonly dust: Points;
   private readonly dustPositions: Float32Array;
+  private readonly dustVelocities: Float32Array;
+  private readonly dustLife: Float32Array;
   private readonly startPose: { position: Vector3; heading: number };
   private readonly previousCarPosition: Vector3;
   private readonly cameraTravel = new Vector3();
   private readonly isFormula: boolean;
   private readonly topSpeed: number;
   private readonly formulaDynamics?: FormulaDynamics;
+  private readonly rallyDynamics?: RallyDynamics;
   private heading: number;
   private speed = 0;
   private steering = 0;
@@ -69,6 +72,7 @@ export class Game {
   private checkpoint = 0;
   private countdown = 3.8;
   private dustCursor = 0;
+  private dustSpawnCarry = 0;
   private offCourseTime = 0;
   private stuckTime = 0;
 
@@ -77,6 +81,7 @@ export class Game {
     this.isFormula = circuit.id === "silverstone";
     this.topSpeed = this.isFormula ? 94 : 49;
     if (this.isFormula) this.formulaDynamics = new FormulaDynamics();
+    else this.rallyDynamics = new RallyDynamics();
     this.hud = new HUD(this.stage);
     this.startPose = this.stage.startPose();
     this.previousCarPosition = this.startPose.position.clone();
@@ -112,10 +117,12 @@ export class Game {
     this.scene.add(sun);
 
     const dustGeometry = new BufferGeometry();
-    this.dustPositions = new Float32Array(75 * 3);
+    this.dustPositions = new Float32Array(180 * 3);
+    this.dustVelocities = new Float32Array(180 * 3);
+    this.dustLife = new Float32Array(180);
     this.dustPositions.fill(-9999);
     dustGeometry.setAttribute("position", new Float32BufferAttribute(this.dustPositions, 3));
-    this.dust = new Points(dustGeometry, new PointsMaterial({ color: 0xd2ab78, size: 1.4, transparent: true, opacity: 0.5, depthWrite: false }));
+    this.dust = new Points(dustGeometry, new PointsMaterial({ color: 0xe0ba78, size: 2.15, transparent: true, opacity: 0.62, depthWrite: false }));
     this.scene.add(this.dust);
 
     this.camera.position.copy(this.car.root.position).add(new Vector3(0, 4.6, 9));
@@ -181,24 +188,22 @@ export class Game {
       this.aeroLoad = motion.aeroLoad;
       this.forward.set(-Math.sin(this.heading), 0, -Math.cos(this.heading));
       this.car.root.position.addScaledVector(this.formulaDynamics.velocity, dt);
-    } else {
-      const maxSpeed = offroad ? 27 : this.topSpeed;
-      const acceleration = throttle > 0 ? 19 : throttle < 0 ? 30 : 0;
-      if (this.raceStarted) {
-        if (throttle !== 0) this.speed += throttle * acceleration * dt;
-        else this.speed *= Math.exp(-1.15 * dt);
-        this.speed *= Math.exp(-(offroad ? 1.8 : 0.08) * dt);
-        if (handbrake) this.speed *= Math.exp(-0.72 * dt);
-        this.speed = MathUtils.clamp(this.speed, -10, maxSpeed);
-      }
-      const speedRatio = Math.min(1, Math.abs(this.speed) / 25);
-      const steeringAuthority = (0.25 + speedRatio * 0.75) * (handbrake ? 1.75 : 1);
-      if (this.raceStarted && Math.abs(this.speed) > 0.05) {
-        this.heading += this.steering * steeringAuthority * 1.45 * dt * Math.sign(this.speed);
-      }
+    } else if (this.rallyDynamics) {
+      const motion = this.rallyDynamics.update(this.heading, {
+        dt,
+        drive: this.raceStarted ? throttle : 0,
+        steering: this.raceStarted ? this.steering : 0,
+        handbrake: this.raceStarted && handbrake,
+        surfaceGrip: this.stage.surfaceGrip(nearest.index, nearest.side),
+        topSpeed: this.topSpeed,
+      });
+      this.heading = motion.heading;
+      this.speed = motion.speed;
+      this.longitudinalG = motion.longitudinalG;
+      this.lateralG = motion.lateralG;
+      this.slipAngle = motion.slipAngle;
       this.forward.set(-Math.sin(this.heading), 0, -Math.cos(this.heading));
-      this.velocity.copy(this.forward).multiplyScalar(this.speed * dt);
-      this.car.root.position.add(this.velocity);
+      this.car.root.position.addScaledVector(this.rallyDynamics.velocity, dt);
     }
 
     const updated = this.stage.nearest(this.car.root.position, nearest.index);
@@ -221,7 +226,7 @@ export class Game {
     const turn = this.stage.tangent(lookAhead).clone().cross(this.stage.tangent(updated.index)).y;
     this.hud.update({ speed: this.speed, elapsed: this.elapsed, progress, offroad, checkpoint: this.checkpoint, turn });
 
-    this.updateDust(dt, this.stage.id === "pine-run" && (offroad || handbrake));
+    this.updateDust(dt, this.stage.id === "pine-run" && this.raceStarted, offroad, handbrake);
     this.updateCamera(dt, handbrake || (this.isFormula && throttle < 0));
     if (this.checkpoint === this.stage.checkpointIndices.length && this.raceStarted) {
       this.finish();
@@ -305,19 +310,44 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
-  private updateDust(dt: number, active: boolean): void {
+  private updateDust(dt: number, active: boolean, offroad: boolean, handbrake: boolean): void {
     const position = this.dust.geometry.getAttribute("position") as Float32BufferAttribute;
-    for (let index = 0; index < this.dustPositions.length; index += 3) {
-      this.dustPositions[index + 1] += dt * 0.65;
-      this.dustPositions[index] += Math.sin(index * 12.4) * dt * 0.18;
-    }
-    if (active && Math.abs(this.speed) > 5) {
-      for (let particle = 0; particle < 2; particle += 1) {
-        const index = (this.dustCursor++ % 75) * 3;
-        this.dustPositions[index] = this.car.root.position.x - this.forward.x * 2.2 + (Math.random() - 0.5) * 1.8;
-        this.dustPositions[index + 1] = this.car.root.position.y + 0.15;
-        this.dustPositions[index + 2] = this.car.root.position.z - this.forward.z * 2.2 + (Math.random() - 0.5) * 1.8;
+    for (let particle = 0; particle < this.dustLife.length; particle += 1) {
+      if (this.dustLife[particle] <= 0) continue;
+      const index = particle * 3;
+      this.dustLife[particle] -= dt;
+      if (this.dustLife[particle] <= 0) {
+        this.dustPositions[index] = -9999;
+        continue;
       }
+      this.dustPositions[index] += this.dustVelocities[index] * dt;
+      this.dustPositions[index + 1] += this.dustVelocities[index + 1] * dt;
+      this.dustPositions[index + 2] += this.dustVelocities[index + 2] * dt;
+      this.dustVelocities[index] *= Math.exp(-1.7 * dt);
+      this.dustVelocities[index + 1] += 0.26 * dt;
+      this.dustVelocities[index + 2] *= Math.exp(-1.7 * dt);
+    }
+
+    const speedRatio = MathUtils.clamp(Math.abs(this.speed) / this.topSpeed, 0, 1);
+    const slideIntensity = Math.min(1, Math.abs(this.slipAngle) * 2.2 + Math.abs(this.steering) * speedRatio * 0.55);
+    const particlesPerSecond = active && Math.abs(this.speed) > 3
+      ? 7 + speedRatio * 19 + slideIntensity * 24 + (offroad ? 18 : 0) + (handbrake ? 12 : 0)
+      : 0;
+    this.dustSpawnCarry += particlesPerSecond * dt;
+    while (this.dustSpawnCarry >= 1) {
+      this.dustSpawnCarry -= 1;
+      const particle = this.dustCursor++ % this.dustLife.length;
+      const index = particle * 3;
+      const side = (Math.random() < 0.5 ? -1 : 1) * (0.68 + Math.random() * 0.3);
+      const rear = 1.65 + Math.random() * 0.7;
+      this.dustPositions[index] = this.car.root.position.x - this.forward.x * rear + this.right.x * side;
+      this.dustPositions[index + 1] = this.car.root.position.y + 0.12 + Math.random() * 0.14;
+      this.dustPositions[index + 2] = this.car.root.position.z - this.forward.z * rear + this.right.z * side;
+      const lateralKick = side * (0.7 + slideIntensity * 2.8);
+      this.dustVelocities[index] = -this.forward.x * Math.abs(this.speed) * 0.14 + this.right.x * lateralKick + (Math.random() - 0.5) * 1.1;
+      this.dustVelocities[index + 1] = 0.55 + Math.random() * (0.72 + slideIntensity * 0.5);
+      this.dustVelocities[index + 2] = -this.forward.z * Math.abs(this.speed) * 0.14 + this.right.z * lateralKick + (Math.random() - 0.5) * 1.1;
+      this.dustLife[particle] = 0.85 + Math.random() * (0.65 + slideIntensity * 0.45);
     }
     position.needsUpdate = true;
   }

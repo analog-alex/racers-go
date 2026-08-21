@@ -94,16 +94,17 @@ export class RallyCar {
       else wheel.rotateX(speed * dt * 0.42);
     }
     for (const wheel of this.frontWheels) wheel.rotation.y = steering * 0.38;
-    if (this.generatedModelPath.includes("formula-car") && feedback) {
-      const speedRatio = MathUtils.clamp(Math.abs(speed) / 94, 0, 1);
-      const vibration = Math.sin(elapsed * 44) * speedRatio * 0.003;
-      const rideHeight = -feedback.aeroLoad * 0.035 + vibration;
-      const pitch = MathUtils.clamp(feedback.longitudinalG * 0.008, -0.04, 0.025);
-      const roll = MathUtils.clamp(-feedback.lateralG * 0.0055, -0.028, 0.028);
+    if (feedback) {
+      const isFormula = this.generatedModelPath.includes("formula-car");
+      const speedRatio = MathUtils.clamp(Math.abs(speed) / (isFormula ? 94 : 49), 0, 1);
+      const vibration = Math.sin(elapsed * (isFormula ? 44 : 27)) * speedRatio * (isFormula ? 0.003 : 0.012);
+      const rideHeight = (isFormula ? -feedback.aeroLoad * 0.035 : 0) + vibration;
+      const pitch = MathUtils.clamp(feedback.longitudinalG * (isFormula ? 0.008 : 0.018), isFormula ? -0.04 : -0.065, isFormula ? 0.025 : 0.045);
+      const roll = MathUtils.clamp(-feedback.lateralG * (isFormula ? 0.0055 : 0.024), isFormula ? -0.028 : -0.065, isFormula ? 0.028 : 0.065);
       this.body.position.y += (rideHeight - this.body.position.y) * Math.min(1, dt * 12);
       this.body.rotation.x += (pitch - this.body.rotation.x) * Math.min(1, dt * 10);
       this.body.rotation.z += (roll - this.body.rotation.z) * Math.min(1, dt * 12);
-      this.body.rotation.y += (-feedback.slipAngle * 0.18 - this.body.rotation.y) * Math.min(1, dt * 10);
+      this.body.rotation.y += (-feedback.slipAngle * (isFormula ? 0.18 : 0.5) - this.body.rotation.y) * Math.min(1, dt * 10);
     } else {
       this.body.position.y = Math.sin(elapsed * 16) * Math.min(speed / 45, 1) * 0.016;
       this.body.rotation.z += (steering * Math.min(speed / 28, 1) * -0.055 - this.body.rotation.z) * Math.min(1, dt * 8);
