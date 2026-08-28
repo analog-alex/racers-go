@@ -63,8 +63,8 @@ const speckles = (
 ): void => {
   context.fillStyle = color;
   for (let index = 0; index < count; index += 1) {
-    // Aggregate should break up large flat surfaces without reading as bright
-    // gravel or visual noise from the chase camera.
+    // Aggregate should break up large flat surfaces without reading as visual
+    // noise from the chase camera.
     context.globalAlpha = 0.055 + random() * 0.12;
     context.beginPath();
     context.arc(random() * 256, random() * 256, 0.25 + random() * radius, 0, Math.PI * 2);
@@ -80,9 +80,8 @@ const surfaceMaterial = (map: CanvasTexture, roughness: number): MeshStandardMat
   new MeshStandardMaterial({ map, roughness, metalness: 0, side: DoubleSide });
 
 /**
- * Build the Silverstone-specific surface palette without external assets.
- * Call this only for Silverstone: the generated maps are intentionally not
- * shared with Pine Run's gravel/forest materials.
+ * Build the shared GP surface palette without external assets.
+ * Both circuits use the same tarmac, runoff, and grass materials.
  */
 export const createSilverstoneMaterials = (): SilverstoneMaterials => {
   const asphaltMap = makeTexture(256, 256, (context, random) => {

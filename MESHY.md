@@ -1,6 +1,6 @@
 # Using Meshy in Racers Go
 
-Meshy is used to generate the game's textured GLB car assets. Generated work stays in `meshy_output/`; the model used by the game is copied to `public/models/rally-car.glb` only after it has been inspected.
+Meshy is used to generate the game's textured GLB car assets. Generated work stays in `meshy_output/`; approved models are copied into `public/models/` only after they have been inspected.
 
 ## Setup
 
@@ -67,16 +67,25 @@ The task JSON records the real `consumed_credits`; report that value and check t
 - Prefer GLB for Three.js because it packages geometry, textures, and PBR materials.
 - Check model size and triangle count before replacing the live asset.
 - Preserve the previous GLB in the Meshy project directory as a rollback copy.
-- Copy the approved model to `public/models/rally-car.glb`.
+- Copy the approved model to its car-specific path in `public/models/`.
 - Run `bun run build`, then test the car from the chase camera in the game.
 
-Smart Topology can return visually separate parts inside one exported mesh. The current rally car contains four disconnected wheel components, which [`src/scene/Car.ts`](src/scene/Car.ts) identifies at load time and places into axle-centred pivots. This provides real wheel roll and front-wheel steering. If a future model does not produce exactly four separable wheel components, the code deliberately leaves its wheels static and logs a warning.
+Smart Topology can return visually separate parts inside one exported mesh. The car loader identifies four disconnected wheel components when available and places them into axle-centred pivots. This provides real wheel roll and front-wheel steering; the current fused slick-tyre export remains stable with static wheels.
 
-## Current rally car
+## Current Retro Force car
 
 - Cleanup task: `01a0114a-2ca1-72c0-8ee7-3c3dd29625e9`
 - Smart Topology task: `01a0114b-b23f-734f-a037-da5e5c5a975b`
 - Result: 13,087 triangles, 7.1 MB GLB
 - Generation cost: 24 credits total
 
-The generation records, reference image, model, thumbnails, and previous-car backup are under `meshy_output/20260817_205435_smart-topology-rally-car_01a0114a/` and `meshy_output/20260817_205614_meshy-t2-rally-car-separated-w_01a0114b/`.
+The generation records, reference image, model, thumbnails, and previous-car backup are under the corresponding `meshy_output/` generation directories.
+
+## E-Modern car
+
+- Cleanup task: `01a04a21-3e87-73bc-8bea-3fe416832561` (9 credits)
+- Smart Topology task: `01a04a23-418f-7769-aa97-4c7fb37045fc` (15 credits)
+- Result: inspected front, right, back, and left views; 6.5 MB GLB
+- Generation cost: 24 credits total
+- Live asset: `public/models/retro-force.glb` (the filename remains stable for existing references).
+- Generation records, cleaned reference, model, and thumbnails are under `meshy_output/20260828_215024_retro-force-f1-smart-topology_01a04a23/`.

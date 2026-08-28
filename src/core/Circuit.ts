@@ -1,4 +1,4 @@
-export type CircuitId = "pine-run" | "silverstone";
+export type CircuitId = "silverstone" | "suzuka";
 
 export interface CircuitDefinition {
   id: CircuitId;
@@ -17,21 +17,6 @@ export interface CircuitDefinition {
 }
 
 export const CIRCUITS: Record<CircuitId, CircuitDefinition> = {
-  "pine-run": {
-    id: "pine-run",
-    code: "SS 01",
-    menuKicker: "Rally / Gravel",
-    name: "Pine Run",
-    title: "Pine",
-    titleAccent: "Run",
-    tagline: "Loose gravel. Thin air. One clean run.",
-    region: "Lora Forest",
-    distance: "3.1 KM",
-    surface: "GRAVEL",
-    condition: "DRY",
-    discipline: "Alpine rally",
-    description: "A narrow forest stage where rhythm matters more than bravery.",
-  },
   silverstone: {
     id: "silverstone",
     code: "GP 02",
@@ -47,7 +32,22 @@ export const CIRCUITS: Record<CircuitId, CircuitDefinition> = {
     discipline: "Grand prix circuit",
     description: "A fast, open circuit built for commitment, precision, and clean exits.",
   },
+  suzuka: {
+    id: "suzuka",
+    code: "GP 03",
+    menuKicker: "Formula / Tarmac",
+    name: "Suzuka",
+    title: "Suzuka",
+    titleAccent: "Circuit",
+    tagline: "Esses. Spoon. 130R. One lap, no wasted motion.",
+    region: "Mie, Japan",
+    distance: "5.8 KM",
+    surface: "TARMAC",
+    condition: "DRY",
+    discipline: "Grand prix circuit",
+    description: "A flowing figure-eight GP layout where rhythm, commitment, and clean transitions make the lap.",
+  },
 };
 
 export const getCircuit = (id: string | null): CircuitDefinition =>
-  id === "silverstone" ? CIRCUITS.silverstone : CIRCUITS["pine-run"];
+  id === "suzuka" ? CIRCUITS.suzuka : CIRCUITS.silverstone;

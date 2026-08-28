@@ -27,26 +27,24 @@ export interface CarDynamicsFeedback {
   aeroLoad: number;
 }
 
-export class RallyCar {
+export class RaceCar {
   readonly root = new Group();
   readonly wheels: Object3D[] = [];
   readonly frontWheels: Object3D[] = [];
   private readonly body = new Group();
 
-  constructor(private readonly generatedModelPath = "./models/rally-car.glb") {
+  constructor(private readonly generatedModelPath = "./models/formula-car.glb") {
     this.root.add(this.body);
     this.buildFallback();
-    if (this.generatedModelPath.includes("formula-car")) {
-      const contactShadow = new Mesh(
-        new CircleGeometry(1, 32),
-        new MeshBasicMaterial({ color: 0x07090a, transparent: true, opacity: 0.3, depthWrite: false }),
-      );
-      contactShadow.rotation.x = -Math.PI / 2;
-      contactShadow.position.y = -0.305;
-      contactShadow.scale.set(1.2, 2.8, 1);
-      contactShadow.renderOrder = 2;
-      this.root.add(contactShadow);
-    }
+    const contactShadow = new Mesh(
+      new CircleGeometry(1, 32),
+      new MeshBasicMaterial({ color: 0x07090a, transparent: true, opacity: 0.3, depthWrite: false }),
+    );
+    contactShadow.rotation.x = -Math.PI / 2;
+    contactShadow.position.y = -0.305;
+    contactShadow.scale.set(1.2, 2.8, 1);
+    contactShadow.renderOrder = 2;
+    this.root.add(contactShadow);
     this.root.scale.setScalar(1.08);
   }
 
@@ -65,7 +63,7 @@ export class RallyCar {
       const bounds = new Box3().setFromObject(model);
       const size = bounds.getSize(new Vector3());
       const center = bounds.getCenter(new Vector3());
-      const targetLength = this.generatedModelPath.includes("formula-car") ? 5.4 : 4.2;
+      const targetLength = 5.4;
       const scale = targetLength / Math.max(size.x, size.z, 0.001);
       model.scale.setScalar(scale);
       model.position.set(-center.x * scale, -center.y * scale + size.y * scale * 0.5 + 0.02, -center.z * scale);
@@ -74,7 +72,7 @@ export class RallyCar {
           // The generated formula mesh contains long, nearly coplanar faces
           // that produce stretched shadow-map triangles across the circuit.
           // A compact contact shadow gives a stable result at racing speed.
-          child.castShadow = !this.generatedModelPath.includes("formula-car");
+          child.castShadow = false;
           child.receiveShadow = true;
         }
       });
@@ -95,16 +93,15 @@ export class RallyCar {
     }
     for (const wheel of this.frontWheels) wheel.rotation.y = steering * 0.38;
     if (feedback) {
-      const isFormula = this.generatedModelPath.includes("formula-car");
-      const speedRatio = MathUtils.clamp(Math.abs(speed) / (isFormula ? 94 : 49), 0, 1);
-      const vibration = Math.sin(elapsed * (isFormula ? 44 : 27)) * speedRatio * (isFormula ? 0.003 : 0.012);
-      const rideHeight = (isFormula ? -feedback.aeroLoad * 0.035 : 0) + vibration;
-      const pitch = MathUtils.clamp(feedback.longitudinalG * (isFormula ? 0.008 : 0.018), isFormula ? -0.04 : -0.065, isFormula ? 0.025 : 0.045);
-      const roll = MathUtils.clamp(-feedback.lateralG * (isFormula ? 0.0055 : 0.024), isFormula ? -0.028 : -0.065, isFormula ? 0.028 : 0.065);
+      const speedRatio = MathUtils.clamp(Math.abs(speed) / 94, 0, 1);
+      const vibration = Math.sin(elapsed * 44) * speedRatio * 0.003;
+      const rideHeight = -feedback.aeroLoad * 0.035 + vibration;
+      const pitch = MathUtils.clamp(feedback.longitudinalG * 0.008, -0.04, 0.025);
+      const roll = MathUtils.clamp(-feedback.lateralG * 0.0055, -0.028, 0.028);
       this.body.position.y += (rideHeight - this.body.position.y) * Math.min(1, dt * 12);
       this.body.rotation.x += (pitch - this.body.rotation.x) * Math.min(1, dt * 10);
       this.body.rotation.z += (roll - this.body.rotation.z) * Math.min(1, dt * 12);
-      this.body.rotation.y += (-feedback.slipAngle * (isFormula ? 0.18 : 0.5) - this.body.rotation.y) * Math.min(1, dt * 10);
+      this.body.rotation.y += (-feedback.slipAngle * 0.18 - this.body.rotation.y) * Math.min(1, dt * 10);
     } else {
       this.body.position.y = Math.sin(elapsed * 16) * Math.min(speed / 45, 1) * 0.016;
       this.body.rotation.z += (steering * Math.min(speed / 28, 1) * -0.055 - this.body.rotation.z) * Math.min(1, dt * 8);
@@ -185,12 +182,8 @@ export class RallyCar {
         && center.y < 0.5;
     });
     if (wheelParts.length !== 4) {
-      // The Formula export is a deliberately fused body mesh. Its slick tyres
-      // have no visible tread, so static wheel rotation is not noticeable; do
-      // not report that known asset topology as a runtime problem.
-      if (!this.generatedModelPath.includes("formula-car")) {
-        console.warn(`Generated vehicle has ${wheelParts.length} separable wheel components; keeping its wheels static.`);
-      }
+      // The formula export is a deliberately fused body mesh; its slick tyres
+      // have no visible tread, so static wheel rotation is not noticeable.
       return false;
     }
 
