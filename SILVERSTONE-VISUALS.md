@@ -1,9 +1,9 @@
 # Silverstone visual workflow
 
-Silverstone uses a hybrid workflow: the driveable circuit remains procedural,
+The GP circuits use a hybrid workflow: the driveable circuits remain procedural,
 surface detail is generated at runtime, and larger trackside structures are
 imported as reusable GLB assets. Keep every Silverstone-specific change behind
-the `circuit.id === "silverstone"` guard so Pine Run is unaffected.
+the formula-stage renderer so both GP circuits share the same visual language.
 
 ## Textures
 
@@ -16,9 +16,9 @@ Runtime materials live in `src/scene/SilverstoneMaterials.ts`.
    and moderate anisotropy. Track ribbons need `DoubleSide` because their
    winding can reverse around tight bends.
 3. Keep texture contrast restrained. Aggregate should break up flat surfaces,
-   not read as bright gravel from the chase camera.
+   not read as visual noise from the chase camera.
 4. Apply the materials in `Stage.buildGround()`, `Stage.buildRoad()`, and the
-   runoff section of `Stage.buildSilverstoneDetails()`.
+   runoff section of `Stage.buildFormulaDetails()`.
 
 Custom ribbon geometry must include UVs. U follows cumulative physical distance
 along the track and V crosses the strip:
@@ -118,4 +118,3 @@ Check both circuits in the browser. For Silverstone, verify:
 - the procedural grandstand fallback disappears after GLBs load;
 - the minimap centerline does not cross itself;
 - there are no console errors while driving.
-

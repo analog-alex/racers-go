@@ -4,34 +4,17 @@ import {
   BufferGeometry,
   CatmullRomCurve3,
   Color,
-  ConeGeometry,
   CylinderGeometry,
   DoubleSide,
   Group,
-  InstancedMesh,
-  Matrix4,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
-  Quaternion,
   Vector3,
 } from "three";
 import type { CircuitDefinition } from "../core/Circuit";
-import { loadPineRunAssets } from "./PineRunAssets";
-import { createPineRunMaterials, type PineRunMaterials } from "./PineRunMaterials";
 import { loadSilverstoneAssets } from "./SilverstoneAssets";
 import { createSilverstoneMaterials, type SilverstoneMaterials } from "./SilverstoneMaterials";
-
-const TRACK_POINTS = [
-  [0, 0, 0], [-28, 1, -70], [-65, 3, -145], [-38, 7, -228], [35, 10, -292],
-  [112, 12, -352], [126, 15, -435], [72, 17, -505], [-18, 20, -545],
-  [-102, 23, -610], [-112, 28, -705], [-55, 32, -774], [35, 35, -820],
-  [102, 38, -890], [90, 42, -978], [18, 44, -1045], [-72, 47, -1100],
-  [-127, 50, -1182], [-86, 53, -1265], [2, 56, -1302], [86, 59, -1366],
-  [112, 62, -1455], [58, 66, -1535], [-35, 68, -1580], [-98, 70, -1660],
-  [-72, 73, -1750], [8, 76, -1815], [86, 78, -1880], [76, 80, -1970],
-  [4, 82, -2042], [-65, 84, -2118], [-42, 87, -2202], [36, 89, -2265],
-] as const;
 
 const SILVERSTONE_TRACK_POINTS = [
   // The GP layout, ordered clockwise from the start/finish line. The former
@@ -53,8 +36,23 @@ const SILVERSTONE_TRACK_POINTS = [
   [-18, 0, -12],
 ] as const;
 
+const SUZUKA_TRACK_POINTS = [
+  // A compact GP layout inspired by Suzuka's long straight, hairpin, and
+  // flowing direction changes in the supplied track reference.
+  [0, 0, 0], [58, 0, 2], [124, 0, -4], [188, 0, -25], [226, 0, -68],
+  [232, 0, -116], [210, 0, -151], [164, 0, -169], [112, 0, -166],
+  [78, 0, -143], [56, 0, -108], [29, 0, -91], [9, 0, -112],
+  [-10, 0, -150], [-44, 0, -171], [-79, 0, -165], [-96, 0, -136],
+  [-83, 0, -107], [-47, 0, -83], [-9, 0, -57], [-20, 0, -28],
+  [-62, 0, -13], [-119, 0, -12], [-166, 0, -28], [-194, 0, -61],
+  [-192, 0, -99], [-171, 0, -124], [-132, 0, -125], [-104, 0, -103],
+  [-115, 0, -74], [-149, 0, -53], [-169, 0, -27], [-149, 0, -6],
+  [-91, 0, 8], [-30, 0, 10],
+] as const;
+
 export class Stage {
   readonly id: CircuitDefinition["id"];
+  readonly definition: CircuitDefinition;
   readonly root = new Group();
   readonly curve: CatmullRomCurve3;
   readonly samples: Vector3[];
@@ -63,21 +61,20 @@ export class Stage {
   readonly checkpointIndices = [140, 280, 420, 560, 700] as const;
   private readonly tangents: Vector3[] = [];
   private readonly normals: Vector3[] = [];
-  private readonly pineRunMaterials?: PineRunMaterials;
   private readonly silverstoneMaterials?: SilverstoneMaterials;
 
   constructor(circuit: CircuitDefinition) {
     this.id = circuit.id;
+    this.definition = circuit;
     this.curve = new CatmullRomCurve3(
-      (circuit.id === "silverstone" ? SILVERSTONE_TRACK_POINTS : TRACK_POINTS).map(([x, y, z]) => new Vector3(x, y, z)),
-      circuit.id === "silverstone",
+      (circuit.id === "silverstone" ? SILVERSTONE_TRACK_POINTS : SUZUKA_TRACK_POINTS).map(([x, y, z]) => new Vector3(x, y, z)),
+      true,
       "catmullrom",
       0.35,
     );
     this.samples = this.curve.getPoints(700);
-    this.roadWidth = circuit.id === "silverstone" ? 14 : 10.5;
-    if (this.id === "pine-run") this.pineRunMaterials = createPineRunMaterials();
-    if (this.id === "silverstone") this.silverstoneMaterials = createSilverstoneMaterials();
+    this.roadWidth = 14;
+    this.silverstoneMaterials = createSilverstoneMaterials();
     this.samples.forEach((_, index) => {
       const tangent = this.curve.getTangent(index / (this.samples.length - 1)).normalize();
       this.tangents.push(tangent);
@@ -85,23 +82,14 @@ export class Stage {
     });
     this.buildGround();
     this.buildRoad();
-    if (this.id === "silverstone") {
-      this.buildSilverstoneDetails();
-      // Scenery is optional and loads independently of the playable stage.
-      void this.loadSilverstoneAssets();
-    }
-    else {
-      this.buildPineRunDetails();
-      this.buildForest();
-      // The authored structures are optional: procedural versions remain a
-      // complete rally-stage fallback while their GLBs load in the background.
-      void this.loadPineRunAssets();
-    }
+    this.buildFormulaDetails();
+    // Silverstone's authored scenery is optional; Suzuka uses the shared
+    // procedural GP dressing so it remains self-contained.
+    if (this.id === "silverstone") void this.loadSilverstoneAssets();
     this.buildCheckpoints();
     if (this.checkpoints.length !== this.checkpointIndices.length) {
       throw new Error("Stage checkpoint positions must include the finish gate.");
     }
-    if (this.id === "pine-run") this.buildMountains();
   }
 
   startPose(): { position: Vector3; heading: number } {
@@ -140,15 +128,8 @@ export class Stage {
     return this.tangents[Math.max(0, Math.min(this.tangents.length - 1, index))];
   }
 
-  surfaceGrip(index: number, side: number): number {
-    if (this.id === "silverstone") return Math.abs(side) > this.roadWidth - 0.7 ? 0.42 : 1;
-    if (Math.abs(side) > this.roadWidth - 0.7) return 0.4;
-
-    // The centre of a stage is usually compacted by prior cars; gravel gets
-    // looser towards the edge and varies modestly from one section to another.
-    const packedLine = 1 - Math.min(1, Math.abs(side) / this.roadWidth);
-    const sectionVariation = 0.94 + Math.sin(index * 0.19) * 0.035 + Math.sin(index * 0.047) * 0.025;
-    return (0.62 + packedLine * 0.14) * sectionVariation;
+  surfaceGrip(_index: number, side: number): number {
+    return Math.abs(side) > this.roadWidth - 0.7 ? 0.42 : 1;
   }
 
   drawMinimap(canvas: HTMLCanvasElement, progress: number): void {
@@ -198,10 +179,10 @@ export class Stage {
     const minZ = Math.min(...zs);
     const maxZ = Math.max(...zs);
     const width = Math.max(2400, maxX - minX + 900);
-    const depth = Math.max(this.id === "silverstone" ? 1800 : 3000, maxZ - minZ + 900);
+    const depth = Math.max(1800, maxZ - minZ + 900);
     const ground = new Mesh(
       new PlaneGeometry(width, depth),
-      this.silverstoneMaterials?.grass ?? this.pineRunMaterials?.forestFloor ?? new MeshStandardMaterial({ color: 0x456b38, roughness: 1 })
+      this.silverstoneMaterials?.grass ?? new MeshStandardMaterial({ color: 0x456b38, roughness: 1 })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set((minX + maxX) / 2, -0.1, (minZ + maxZ) / 2);
@@ -247,18 +228,13 @@ export class Stage {
       mesh.receiveShadow = true;
       return mesh;
     };
-    if (this.id === "silverstone") {
-      this.root.add(makeStrip(-this.roadWidth - 3, this.roadWidth + 3, 0.035, 0x697176, 0x697176, this.silverstoneMaterials?.shoulder));
-      this.root.add(makeStrip(-this.roadWidth, this.roadWidth, 0.075, 0x30363a, 0x30363a, this.silverstoneMaterials?.asphalt));
-      this.root.add(makeStrip(this.roadWidth - 0.34, this.roadWidth, 0.092, 0xf0eee6, 0xf0eee6));
-      this.root.add(makeStrip(-this.roadWidth, -this.roadWidth + 0.34, 0.092, 0xf0eee6, 0xf0eee6));
-    } else {
-      this.root.add(makeStrip(-this.roadWidth - 2.5, this.roadWidth + 2.5, 0.04, 0x876943, 0x75593b, this.pineRunMaterials?.shoulder));
-      this.root.add(makeStrip(-this.roadWidth, this.roadWidth, 0.08, 0xa48358, 0x95744e, this.pineRunMaterials?.gravel));
-    }
+    this.root.add(makeStrip(-this.roadWidth - 3, this.roadWidth + 3, 0.035, 0x697176, 0x697176, this.silverstoneMaterials?.shoulder));
+    this.root.add(makeStrip(-this.roadWidth, this.roadWidth, 0.075, 0x30363a, 0x30363a, this.silverstoneMaterials?.asphalt));
+    this.root.add(makeStrip(this.roadWidth - 0.34, this.roadWidth, 0.092, 0xf0eee6, 0xf0eee6));
+    this.root.add(makeStrip(-this.roadWidth, -this.roadWidth + 0.34, 0.092, 0xf0eee6, 0xf0eee6));
   }
 
-  private buildSilverstoneDetails(): void {
+  private buildFormulaDetails(): void {
     const buildDetailStrip = (
       start: number,
       end: number,
@@ -364,7 +340,7 @@ export class Stage {
     const standMaterial = new MeshStandardMaterial({ color: 0x4f5d64, roughness: 0.9 });
     const seatMaterial = new MeshStandardMaterial({ color: 0x1e343f, roughness: 0.92 });
     const proceduralGrandstands = new Group();
-    proceduralGrandstands.name = "silverstone-procedural-grandstands";
+    proceduralGrandstands.name = "formula-procedural-grandstands";
     [24, 206, 346, 506, 650].forEach((sampleIndex, index) => {
       const point = this.samples[sampleIndex];
       const normal = this.normals[sampleIndex];
@@ -396,132 +372,16 @@ export class Stage {
     // The procedural stands are a complete fallback. Once the authored
     // grandstand prototype is available, avoid drawing both versions at once.
     if (result.loaded.some((url) => url.endsWith("silverstone-grandstand.glb"))) {
-      const fallback = this.root.getObjectByName("silverstone-procedural-grandstands");
+      const fallback = this.root.getObjectByName("formula-procedural-grandstands");
       if (fallback) fallback.visible = false;
     }
   }
 
-  private buildPineRunDetails(): void {
-    const lineMaterial = new MeshStandardMaterial({ color: 0xf0e8d1, roughness: .9 });
-    const start = new Mesh(new BoxGeometry(this.roadWidth * 2, .028, .72), lineMaterial);
-    start.position.copy(this.samples[0]);
-    start.position.y += .11;
-    start.rotation.y = Math.atan2(-this.normals[0].z, this.normals[0].x);
-    this.root.add(start);
-
-    // Mud patches are deliberately local instead of a baked all-lap texture:
-    // they read at speed without turning a dry gravel stage into a brown blur.
-    const mudGeometry = new BoxGeometry(this.roadWidth * 1.35, .014, 5.5);
-    [118, 246, 411, 564, 676].forEach((sampleIndex) => {
-      const patch = new Mesh(mudGeometry, this.pineRunMaterials?.mudDecal ?? new MeshStandardMaterial({ color: 0x60452e, roughness: 1 }));
-      patch.position.copy(this.samples[sampleIndex]);
-      patch.position.y += .105;
-      patch.rotation.y = Math.atan2(-this.normals[sampleIndex].z, this.normals[sampleIndex].x);
-      this.root.add(patch);
-    });
-
-    const hutWall = new MeshStandardMaterial({ color: 0x41382d, roughness: .96 });
-    const hutRoof = new MeshStandardMaterial({ color: 0x293d39, roughness: .84, metalness: .08 });
-    const hutGroup = new Group();
-    hutGroup.name = "pine-run-procedural-timing-huts";
-    [35, 278, 596].forEach((sampleIndex, index) => {
-      const point = this.samples[sampleIndex];
-      const normal = this.normals[sampleIndex];
-      const tangent = this.tangents[sampleIndex];
-      const hut = new Group();
-      hut.position.copy(point).addScaledVector(normal, (index % 2 === 0 ? 1 : -1) * 38);
-      hut.position.y += 2.4;
-      hut.rotation.y = Math.atan2(tangent.x, tangent.z) + Math.PI / 2;
-      const cabin = new Mesh(new BoxGeometry(5.5, 4.8, 4.1), hutWall);
-      const roof = new Mesh(new BoxGeometry(6.5, .42, 5.1), hutRoof);
-      roof.position.y = 2.6;
-      cabin.castShadow = true;
-      roof.castShadow = true;
-      hut.add(cabin, roof);
-      hutGroup.add(hut);
-    });
-    this.root.add(hutGroup);
-
-    const logMaterial = new MeshStandardMaterial({ color: 0x6c4e31, roughness: 1 });
-    const braceMaterial = new MeshStandardMaterial({ color: 0x303433, roughness: .72, metalness: .28 });
-    const barrierGroup = new Group();
-    barrierGroup.name = "pine-run-procedural-log-barriers";
-    [88, 176, 332, 454, 648].forEach((sampleIndex, index) => {
-      const point = this.samples[sampleIndex];
-      const normal = this.normals[sampleIndex];
-      const tangent = this.tangents[sampleIndex];
-      const barrier = new Group();
-      barrier.position.copy(point).addScaledVector(normal, (index % 2 === 0 ? -1 : 1) * 25);
-      barrier.position.y += 1.1;
-      barrier.rotation.y = Math.atan2(tangent.x, tangent.z) + Math.PI / 2;
-      [-.45, .45].forEach((height) => {
-        const log = new Mesh(new CylinderGeometry(.22, .25, 7.4, 7), logMaterial);
-        log.rotation.z = Math.PI / 2;
-        log.position.y = height;
-        log.castShadow = true;
-        barrier.add(log);
-      });
-      [-2.9, 2.9].forEach((x) => {
-        const brace = new Mesh(new BoxGeometry(.35, 2, .45), braceMaterial);
-        brace.position.set(x, 0, 0);
-        brace.castShadow = true;
-        barrier.add(brace);
-      });
-      barrierGroup.add(barrier);
-    });
-    this.root.add(barrierGroup);
-  }
-
-  private async loadPineRunAssets(): Promise<void> {
-    const result = await loadPineRunAssets(this);
-    if (result.loaded.some((url) => url.endsWith("pine-run-timing-hut.glb"))) {
-      this.root.getObjectByName("pine-run-procedural-timing-huts")?.removeFromParent();
-    }
-    if (result.loaded.some((url) => url.endsWith("pine-run-log-barrier.glb"))) {
-      this.root.getObjectByName("pine-run-procedural-log-barriers")?.removeFromParent();
-    }
-  }
-
-  private buildForest(): void {
-    const trunkGeometry = new CylinderGeometry(0.22, 0.34, 2.8, 6);
-    const crownGeometry = new ConeGeometry(1.65, 5.8, 7);
-    const trunkMaterial = new MeshStandardMaterial({ color: 0x4c3225, roughness: 1 });
-    const crownMaterial = new MeshStandardMaterial({ color: 0x174d3a, roughness: 0.92 });
-    const count = 360;
-    const trunks = new InstancedMesh(trunkGeometry, trunkMaterial, count);
-    const crowns = new InstancedMesh(crownGeometry, crownMaterial, count);
-    const matrix = new Matrix4();
-    let seed = 8184;
-    const random = (): number => {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      return seed / 4294967296;
-    };
-    for (let index = 0; index < count; index += 1) {
-      const sampleIndex = Math.floor(random() * this.samples.length);
-      const point = this.samples[sampleIndex];
-      const normal = this.normals[sampleIndex];
-      const side = random() > 0.5 ? 1 : -1;
-      const distance = 18 + random() * 120;
-      const x = point.x + normal.x * distance * side + (random() - 0.5) * 28;
-      const z = point.z + normal.z * distance * side + (random() - 0.5) * 28;
-      const y = point.y;
-      const scale = 0.7 + random() * 1.35;
-      matrix.compose(new Vector3(x, y + 1.4 * scale, z), new Quaternion(), new Vector3(scale, scale, scale));
-      trunks.setMatrixAt(index, matrix);
-      matrix.compose(new Vector3(x, y + 4.7 * scale, z), new Quaternion(), new Vector3(scale, scale, scale));
-      crowns.setMatrixAt(index, matrix);
-    }
-    trunks.castShadow = true;
-    crowns.castShadow = true;
-    crowns.receiveShadow = true;
-    this.root.add(trunks, crowns);
-  }
-
   private buildCheckpoints(): void {
     const poleMaterial = new MeshStandardMaterial({ color: 0xe8e2d2, roughness: 0.72 });
-    const bannerMaterial = new MeshStandardMaterial({ color: this.id === "silverstone" ? 0x24343c : 0x1f63ce, roughness: 0.65, side: DoubleSide });
-    const poleHeight = this.id === "silverstone" ? 6.8 : 5.2;
-    const bannerHeight = this.id === "silverstone" ? 0.58 : 0.85;
+    const bannerMaterial = new MeshStandardMaterial({ color: 0x24343c, roughness: 0.65, side: DoubleSide });
+    const poleHeight = 6.8;
+    const bannerHeight = 0.58;
     const indices = [0, ...this.checkpointIndices];
     indices.forEach((sampleIndex, checkpointIndex) => {
       const point = this.samples[sampleIndex];
@@ -543,14 +403,4 @@ export class Stage {
     });
   }
 
-  private buildMountains(): void {
-    const mountainMaterial = new MeshStandardMaterial({ color: 0x63808a, roughness: 1, flatShading: true });
-    for (let index = 0; index < 18; index += 1) {
-      const mountain = new Mesh(new ConeGeometry(80 + (index % 4) * 24, 150 + (index % 5) * 24, 7), mountainMaterial);
-      const side = index % 2 === 0 ? -1 : 1;
-      mountain.position.set(side * (330 + (index % 5) * 70), 58 + (index % 3) * 30, -80 - index * 145);
-      mountain.rotation.y = index * 0.7;
-      this.root.add(mountain);
-    }
-  }
 }

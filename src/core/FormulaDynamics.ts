@@ -70,7 +70,9 @@ export class FormulaDynamics {
     } else if (input.drive > 0) {
       // Strong launch acceleration tapers into an aero/drag-limited top speed.
       const engineAcceleration = 14.5 * (1 - speedRatio * 0.74);
-      acceleration = Math.min(input.offroad ? 4.8 : 13.6, engineAcceleration) * input.drive;
+      // Grass and gravel should cost speed, not strand the car. Keep enough
+      // low-speed wheel force to pull away from a stop and recover the track.
+      acceleration = Math.min(input.offroad ? 8.5 : 13.6, engineAcceleration) * input.drive;
       longitudinal += acceleration * dt;
     } else if (input.drive < 0 && !input.braking) {
       acceleration = -7.5;
@@ -78,7 +80,7 @@ export class FormulaDynamics {
     }
 
     const drag = 0.16 + longitudinal * longitudinal * 0.00043;
-    const surfaceDrag = input.offroad ? 5.5 + Math.abs(longitudinal) * 0.12 : drag;
+    const surfaceDrag = input.offroad ? 3.4 + Math.abs(longitudinal) * 0.08 : drag;
     longitudinal = this.moveTowards(longitudinal, 0, surfaceDrag * dt);
     const speedLimit = input.offroad ? Math.min(40, input.topSpeed) : input.topSpeed;
     longitudinal = MathUtils.clamp(longitudinal, -12, speedLimit);

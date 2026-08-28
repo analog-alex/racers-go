@@ -8,54 +8,89 @@
     <title>Racers Go</title>
   </head>
   <body>
-    <canvas id="game" aria-label="Pine Run rally game"></canvas>
+    <canvas id="game" aria-label="Formula racing game"></canvas>
     <div id="vignette"></div>
 
-    <main id="circuit-screen" class="screen visible">
+    <main id="car-screen" class="screen visible">
+      <section class="circuit-shell car-shell">
+        <div class="circuit-heading">
+          <div>
+            <p class="kicker">Garage / Step 01</p>
+            <h1>Choose<br /><em>your car</em></h1>
+          </div>
+          <p class="circuit-intro">Two machines / One starting grid / Pick your weapon</p>
+        </div>
+
+        <div class="car-grid" aria-label="Available cars">
+          <button class="car-card formula-car-card" type="button" data-car="formula">
+            <span class="car-preview-shell"><canvas data-car-preview="formula" width="560" height="300" aria-label="Rotating Retro Force car preview"></canvas><i>3D / LIVE</i></span>
+            <span class="car-card-top"><b>01</b><small>MODERN SINGLE-SEATER</small></span>
+            <span class="car-card-title">Retro Force</span>
+            <span class="car-card-description">Clean air. Clean lines. Pure speed.</span>
+            <span class="car-card-meta"><i>310 KM/H</i><i>PRECISION</i><strong>↗</strong></span>
+          </button>
+          <button class="car-card retro-force-card" type="button" data-car="retro-force">
+            <span class="car-preview-shell"><canvas data-car-preview="retro-force" width="560" height="300" aria-label="Rotating E-Modern car preview"></canvas><i>3D / LIVE</i></span>
+            <span class="car-card-top"><b>02</b><small>RETRO-MODERN GRAND PRIX</small></span>
+            <span class="car-card-title">E-<em>Modern</em></span>
+            <span class="car-card-description">60s soul. Modern edge. A little lightning for the apex.</span>
+            <span class="car-card-meta"><i>302 KM/H</i><i>BALANCED</i><strong>↗</strong></span>
+          </button>
+        </div>
+        <p class="circuit-footer"><span>SELECT A CAR</span> to continue to circuit selection</p>
+      </section>
+    </main>
+
+    <main id="circuit-screen" class="screen">
       <section class="circuit-shell">
+        <button id="car-menu-button" class="menu-link" type="button">← Change car</button>
         <div class="circuit-heading">
           <p class="kicker">Select a circuit</p>
           <h1>Racers,<br /><em>Go!</em></h1>
-          <p class="circuit-intro">Two Roads / Two Cars / Two ways of having fun</p>
+          <p class="circuit-intro">Two Circuits / Your machine / Infinite ways to miss an apex</p>
         </div>
 
         <div class="circuit-grid" aria-label="Available circuits">
-          <button class="circuit-card rally-card" type="button" data-circuit="pine-run">
-            <span class="circuit-card-top"><b>01</b><small>RALLY / GRAVEL</small></span>
-            <span class="circuit-card-title">Pine <em>Run</em></span>
-            <span class="circuit-card-description">Loose gravel. Thin air. One clean run.</span>
-            <span class="circuit-card-meta"><i>Lora Forest</i><i>3.1 KM</i><strong>↗</strong></span>
-          </button>
           <button class="circuit-card formula-card" type="button" data-circuit="silverstone">
             <span class="circuit-card-top"><b>02</b><small>FORMULA / TARMAC</small></span>
             <span class="circuit-card-title">Silver <em>stone</em></span>
             <span class="circuit-card-description">Late apexes. Flat kerbs. No room for a lazy lap.</span>
             <span class="circuit-card-meta"><i>Northamptonshire</i><i>5.9 KM</i><strong>↗</strong></span>
           </button>
+          <button class="circuit-card formula-card suzuka-card" type="button" data-circuit="suzuka">
+            <span class="circuit-card-top"><b>03</b><small>FORMULA / TARMAC</small></span>
+            <span class="circuit-card-title">Suzuka <em>GP</em></span>
+            <span class="circuit-card-description">Esses. Spoon. 130R. No two corners feel alike.</span>
+            <span class="circuit-card-meta"><i>Mie, Japan</i><i>5.8 KM</i><strong>↗</strong></span>
+          </button>
         </div>
-        <p class="circuit-footer"><span>WASD</span> or <span>ARROWS</span> to drive <i>·</i> <span>SPACE</span> handbrake</p>
+        <p class="circuit-footer"><span>WASD</span> or <span>ARROWS</span> to drive <i>·</i> <span>SPACE</span> brake</p>
       </section>
     </main>
 
     <main id="start-screen" class="screen">
       <section class="start-card">
-        <button id="circuit-menu-button" class="menu-link" type="button">← All circuits</button>
-        <p id="start-kicker" class="kicker">Racers / 01 — Alpine Rally</p>
-        <h1><span id="hero-title">Pine</span><br /><em id="hero-accent">Run</em></h1>
-        <p id="hero-tagline" class="tagline">Loose gravel. Thin air. One clean run.</p>
+        <div class="briefing-links">
+          <button id="circuit-menu-button" class="menu-link" type="button">← Change circuit</button>
+          <button id="briefing-car-button" class="menu-link" type="button">Change car</button>
+        </div>
+        <p id="selected-car-label" class="selected-car-label">Retro Force / MODERN SINGLE-SEATER</p>
+        <p id="start-kicker" class="kicker">Racers / GP 02 — Grand Prix Circuit</p>
+        <h1><span id="hero-title">Silver</span><br /><em id="hero-accent">stone</em></h1>
+        <p id="hero-tagline" class="tagline">Late apexes. Flat kerbs. No room for a lazy lap.</p>
         <button id="start-button" class="primary-button" type="button">
           Start stage <span>↗</span>
         </button>
         <div class="start-controls">
           <span><kbd>WASD</kbd> or <kbd>Arrows</kbd> Drive</span>
-          <span><kbd>Space</kbd> <span id="secondary-control-label">Handbrake</span></span>
+          <span><kbd>Space</kbd> <span id="secondary-control-label">Brake</span></span>
           <span><kbd>R</kbd> Reset</span>
         </div>
       </section>
       <aside class="stage-stamp" aria-label="Stage information">
-        <span id="stamp-code">SS 01</span>
-        <strong id="stamp-region">LORA FOREST</strong>
-        <small id="stamp-meta">3.1 KM · GRAVEL · DRY</small>
+        <span id="stamp-code">GP 02</span>
+        <strong id="stamp-region">NORTHAMPTONSHIRE</strong>
+        <small id="stamp-meta">5.9 KM · TARMAC · DRY</small>
       </aside>
     </main>
 
@@ -86,7 +121,7 @@
         <div><strong id="speed">0</strong><small>km/h</small></div>
         <div class="drive-stats">
           <span>Gear <b id="gear">N</b></span>
-          <span><small id="surface-label">Surface</small> <b id="surface">GRAVEL</b></span>
+          <span><small id="surface-label">Tyres</small> <b id="surface">SOFT</b></span>
         </div>
       </div>
 
@@ -101,7 +136,7 @@
         </div>
       </div>
       <div class="corner-call" id="corner-call"><span>▲</span><b>FLAT</b><small>120</small></div>
-      <div class="control-tip"><kbd>Space</kbd><span id="control-tip-label">Handbrake</span></div>
+      <div class="control-tip"><kbd>Space</kbd><span id="control-tip-label">Brake</span></div>
     </section>
 
     <main id="pause-screen" class="screen">
