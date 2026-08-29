@@ -11,11 +11,84 @@
     <canvas id="game" aria-label="Formula racing game"></canvas>
     <div id="vignette"></div>
 
-    <main id="car-screen" class="screen visible">
-      <section class="circuit-shell car-shell">
+    <section id="main-menu" class="race-menu screen visible" aria-hidden="false" aria-label="Racers Go main menu">
+      <div class="race-menu-grid" aria-hidden="true"></div>
+      <div class="race-menu-content">
+        <header class="race-menu-topline">
+          <span class="race-tag"><i>01</i> Race control</span>
+          <span class="race-live"><i></i> Grid ready / Dry track</span>
+        </header>
+        <div class="race-menu-body">
+          <div class="race-menu-copy">
+            <p class="menu-kicker">RACERS GO // FORMULA SERIES</p>
+            <h1 class="menu-title"><span>Racers</span><strong>Go<span>_</span></strong></h1>
+            <p class="menu-subtitle">Pick a circuit. Find the limit. Bring the lap home.</p>
+            <button id="main-start-button" class="start-control" type="button">
+              <span>Enter the grid</span>
+              <small>Enter</small>
+              <b>↗</b>
+            </button>
+          </div>
+          <aside class="race-data-board" aria-label="Race status">
+            <div class="race-board-header"><span>Race data</span><b>Live</b></div>
+            <div class="race-board-main"><strong>P1</strong><span>OPEN<br />CLASS</span></div>
+            <div class="race-board-track" aria-hidden="true"><i></i><b></b><em></em></div>
+            <div class="race-board-stats">
+              <div><span>Circuits</span><strong>02</strong></div>
+              <div><span>Machines</span><strong>02</strong></div>
+              <div><span>Laps</span><strong>01</strong></div>
+            </div>
+          </aside>
+        </div>
+        <section class="race-controls" aria-label="Controls guide">
+          <div class="race-controls-heading"><span>Driver controls</span><i></i><span>Keyboard / Gamepad</span></div>
+          <div class="race-controls-grid">
+            <div class="race-control-card"><kbd>WASD</kbd><span>Drive</span><small>Left stick</small></div>
+            <div class="race-control-card"><kbd>ARROWS</kbd><span>Drive</span><small>D-pad</small></div>
+            <div class="race-control-card"><kbd>SPACE</kbd><span>Brake</span><small>South button</small></div>
+            <div class="race-control-card"><kbd>R</kbd><span>Reset lap</span><small>Restart</small></div>
+            <div class="race-control-card"><kbd>ESC</kbd><span>Pause</span><small>Start button</small></div>
+          </div>
+        </section>
+        <footer class="race-menu-footer"><span>RACERS GO / 2026</span><span>Two circuits / Two machines / One clean lap</span></footer>
+      </div>
+    </section>
+
+    <main id="circuit-screen" class="screen">
+      <section class="circuit-shell">
+        <button id="circuit-main-menu-button" class="menu-link" type="button">← Main menu</button>
         <div class="circuit-heading">
           <div>
-            <p class="kicker">Garage / Step 01</p>
+            <p class="kicker">Grand Prix / Step 01</p>
+            <h1>Choose<br /><em>your circuit</em></h1>
+          </div>
+          <p class="circuit-intro">Two circuits / One starting grid / Find your line</p>
+        </div>
+
+        <div class="circuit-grid" aria-label="Available circuits">
+          <button class="circuit-card formula-card" type="button" data-circuit="silverstone">
+            <span class="circuit-card-top"><b>01</b><small>FORMULA / TARMAC</small></span>
+            <span class="circuit-card-title">Silver <em>stone</em></span>
+            <span class="circuit-card-description">Late apexes. Flat kerbs. No room for a lazy lap.</span>
+            <span class="circuit-card-meta"><i>Northamptonshire</i><i>5.9 KM</i><strong>↗</strong></span>
+          </button>
+          <button class="circuit-card formula-card suzuka-card" type="button" data-circuit="suzuka">
+            <span class="circuit-card-top"><b>02</b><small>FORMULA / TARMAC</small></span>
+            <span class="circuit-card-title">Suzuka <em>GP</em></span>
+            <span class="circuit-card-description">Esses. Spoon. 130R. No two corners feel alike.</span>
+            <span class="circuit-card-meta"><i>Mie, Japan</i><i>5.8 KM</i><strong>↗</strong></span>
+          </button>
+        </div>
+        <p class="circuit-footer"><span>SELECT A CIRCUIT</span> to continue to car selection</p>
+      </section>
+    </main>
+
+    <main id="car-screen" class="screen">
+      <section class="circuit-shell car-shell">
+        <button id="car-circuit-button" class="menu-link" type="button">← Change circuit</button>
+        <div class="circuit-heading">
+          <div>
+            <p class="kicker">Garage / Step 02</p>
             <h1>Choose<br /><em>your car</em></h1>
           </div>
           <p class="circuit-intro">Two machines / One starting grid / Pick your weapon</p>
@@ -37,7 +110,7 @@
             <span class="car-card-meta"><i>302 KM/H</i><i>BALANCED</i><strong>↗</strong></span>
           </button>
         </div>
-        <p class="circuit-footer"><span>SELECT A CAR</span> to continue to circuit selection</p>
+        <p class="circuit-footer"><span>SELECT A CAR</span> to continue to stage briefing</p>
       </section>
     </main>
 
