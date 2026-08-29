@@ -45,7 +45,7 @@ export const CIRCUITS: Record<CircuitId, CircuitDefinition> = {
     surface: "TARMAC",
     condition: "DRY",
     discipline: "Grand prix circuit",
-    description: "A flowing figure-eight GP layout where rhythm, commitment, and clean transitions make the lap.",
+    description: "A flowing figure-eight GP layout with one elevated crossover where rhythm and commitment make the lap.",
   },
 };
 

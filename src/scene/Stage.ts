@@ -37,17 +37,17 @@ const SILVERSTONE_TRACK_POINTS = [
 ] as const;
 
 const SUZUKA_TRACK_POINTS = [
-  // A compact GP layout inspired by Suzuka's long straight, hairpin, and
-  // flowing direction changes in the supplied track reference.
-  [0, 0, 0], [58, 0, 2], [124, 0, -4], [188, 0, -25], [226, 0, -68],
-  [232, 0, -116], [210, 0, -151], [164, 0, -169], [112, 0, -166],
-  [78, 0, -143], [56, 0, -108], [29, 0, -91], [9, 0, -112],
-  [-10, 0, -150], [-44, 0, -171], [-79, 0, -165], [-96, 0, -136],
-  [-83, 0, -107], [-47, 0, -83], [-9, 0, -57], [-20, 0, -28],
-  [-62, 0, -13], [-119, 0, -12], [-166, 0, -28], [-194, 0, -61],
-  [-192, 0, -99], [-171, 0, -124], [-132, 0, -125], [-104, 0, -103],
-  [-115, 0, -74], [-149, 0, -53], [-169, 0, -27], [-149, 0, -6],
-  [-91, 0, 8], [-30, 0, 10],
+  // Suzuka's signature is a readable figure-eight: one left-hand loop,
+  // one long right-hand loop, and one deliberate crossover in the middle.
+  // The return pass rises into a bridge so the crossing is clear in 3D and
+  // cannot be mistaken for a second junction on the racing line.
+  [-210, 0, -12], [-182, 0, -46], [-132, 0, -78], [-72, 0, -92],
+  [-25, 0, -66], [15, 0, -10], [47, 0, -67], [92, 0, -126],
+  [164, 0, -152], [242, 0, -118], [292, 0, -54], [300, 0, 18],
+  [264, 0, 80], [204, 0, 112], [132, 0, 104], [78, 0, 67],
+  [32, 2, 20], [15, 8, -10], [-22, 5, 50], [-62, 0, 112],
+  [-132, 0, 140], [-204, 0, 112], [-260, 0, 62], [-274, 0, 0],
+  [-248, 0, -46],
 ] as const;
 
 export class Stage {
@@ -82,6 +82,7 @@ export class Stage {
     });
     this.buildGround();
     this.buildRoad();
+    if (this.id === "suzuka") this.buildSuzukaCrossover();
     this.buildFormulaDetails();
     // Silverstone's authored scenery is optional; Suzuka uses the shared
     // procedural GP dressing so it remains self-contained.
@@ -232,6 +233,39 @@ export class Stage {
     this.root.add(makeStrip(-this.roadWidth, this.roadWidth, 0.075, 0x30363a, 0x30363a, this.silverstoneMaterials?.asphalt));
     this.root.add(makeStrip(this.roadWidth - 0.34, this.roadWidth, 0.092, 0xf0eee6, 0xf0eee6));
     this.root.add(makeStrip(-this.roadWidth, -this.roadWidth + 0.34, 0.092, 0xf0eee6, 0xf0eee6));
+  }
+
+  private buildSuzukaCrossover(): void {
+    const railMaterial = new MeshStandardMaterial({ color: 0xc2cbd0, roughness: 0.55, metalness: 0.32 });
+    const supportMaterial = new MeshStandardMaterial({ color: 0x303b43, roughness: 0.8, metalness: 0.1 });
+    const railGeometry = new BoxGeometry(0.42, 1.45, 7.5);
+    const supportGeometry = new BoxGeometry(2.4, 4.1, 2.4);
+    let supportCount = 0;
+
+    // Only the elevated return pass gets bridge furniture. Keeping the
+    // lower racing line open makes the single crossover leg obvious.
+    this.samples.forEach((point, index) => {
+      if (point.y < 1.2) return;
+      const normal = this.normals[index];
+      const tangent = this.tangents[index];
+      for (const side of [-1, 1]) {
+        const rail = new Mesh(railGeometry, railMaterial);
+        rail.position.copy(point).addScaledVector(normal, side * (this.roadWidth + 1.9));
+        rail.position.y += 0.72;
+        rail.rotation.y = Math.atan2(tangent.x, tangent.z);
+        rail.castShadow = true;
+        this.root.add(rail);
+      }
+      if (supportCount < 2 && point.y > 5) {
+        const support = new Mesh(supportGeometry, supportMaterial);
+        support.position.copy(point);
+        support.position.y = point.y / 2;
+        support.scale.y = point.y / 4.1;
+        support.castShadow = true;
+        this.root.add(support);
+        supportCount += 1;
+      }
+    });
   }
 
   private buildFormulaDetails(): void {

@@ -5,11 +5,14 @@ import { getCar, type CarDefinition } from "./core/Cars";
 import { CarPreview } from "./scene/CarPreview";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
+const mainMenu = document.querySelector<HTMLElement>("#main-menu");
+const mainStartButton = document.querySelector<HTMLButtonElement>("#main-start-button");
 const carScreen = document.querySelector<HTMLElement>("#car-screen");
 const circuitScreen = document.querySelector<HTMLElement>("#circuit-screen");
 const startButton = document.querySelector<HTMLButtonElement>("#start-button");
 const circuitMenuButton = document.querySelector<HTMLButtonElement>("#circuit-menu-button");
-const carMenuButton = document.querySelector<HTMLButtonElement>("#car-menu-button");
+const circuitMainMenuButton = document.querySelector<HTMLButtonElement>("#circuit-main-menu-button");
+const carCircuitButton = document.querySelector<HTMLButtonElement>("#car-circuit-button");
 const briefingCarButton = document.querySelector<HTMLButtonElement>("#briefing-car-button");
 const startScreen = document.querySelector<HTMLElement>("#start-screen");
 const loading = document.querySelector<HTMLElement>("#loading");
@@ -18,7 +21,7 @@ const restartButton = document.querySelector<HTMLButtonElement>("#restart-button
 const mainMenuButton = document.querySelector<HTMLButtonElement>("#main-menu-button");
 const failureRestartButton = document.querySelector<HTMLButtonElement>("#failure-restart-button");
 
-if (!canvas || !carScreen || !circuitScreen || !circuitMenuButton || !carMenuButton || !briefingCarButton || !startButton || !startScreen || !loading || !resumeButton || !restartButton || !mainMenuButton || !failureRestartButton) {
+if (!canvas || !mainMenu || !mainStartButton || !carScreen || !circuitScreen || !circuitMenuButton || !circuitMainMenuButton || !carCircuitButton || !briefingCarButton || !startButton || !startScreen || !loading || !resumeButton || !restartButton || !mainMenuButton || !failureRestartButton) {
   throw new Error("Game shell is incomplete");
 }
 
@@ -44,23 +47,42 @@ const syncUrl = (): void => {
 };
 
 const showScreen = (screen: HTMLElement): void => {
-  for (const candidate of [carScreen, circuitScreen, startScreen]) candidate.classList.toggle("visible", candidate === screen);
+  for (const candidate of [mainMenu, carScreen, circuitScreen, startScreen]) {
+    const isVisible = candidate === screen;
+    candidate.classList.toggle("visible", isVisible);
+    if (candidate === mainMenu) candidate.setAttribute("aria-hidden", String(!isVisible));
+  }
 };
 
-const openCarSelection = (): void => {
+const openMainMenu = (): void => {
   selectedCar = null;
   selectedCircuit = null;
   document.body.dataset.car = "";
+  document.body.dataset.circuit = "";
   syncUrl();
-  showScreen(carScreen);
+  showScreen(mainMenu);
 };
 
-const openCircuitSelection = (car: CarDefinition): void => {
-  selectedCar = car;
+const openCircuitSelection = (): void => {
+  selectedCar = null;
   selectedCircuit = null;
-  document.body.dataset.car = car.id;
+  document.body.dataset.car = "";
+  document.body.dataset.circuit = "";
   syncUrl();
   showScreen(circuitScreen);
+};
+
+const openCarSelection = (circuit: CircuitDefinition | null = selectedCircuit): void => {
+  if (!circuit) {
+    openCircuitSelection();
+    return;
+  }
+  selectedCar = null;
+  selectedCircuit = circuit;
+  document.body.dataset.car = "";
+  document.body.dataset.circuit = circuit.id;
+  syncUrl();
+  showScreen(carScreen);
 };
 
 const openStage = (circuit: CircuitDefinition): void => {
@@ -82,19 +104,24 @@ const openStage = (circuit: CircuitDefinition): void => {
   setText("#stamp-meta", `${circuit.distance} · ${circuit.surface} · ${circuit.condition}`);
   setText("#secondary-control-label", "Brake");
   setText("#control-tip-label", "Brake");
-  circuitScreen.classList.remove("visible");
-  startScreen.classList.add("visible");
+  showScreen(startScreen);
   loading.classList.add("visible");
   game = new Game(canvas, circuit, car);
   void game.load().finally(() => loading.classList.remove("visible"));
 };
 
 document.querySelectorAll<HTMLButtonElement>("[data-car]").forEach((button) => {
-  button.addEventListener("click", () => openCircuitSelection(getCar(button.dataset.car ?? null)));
+  button.addEventListener("click", () => {
+    const car = getCar(button.dataset.car ?? null);
+    if (selectedCircuit) {
+      selectedCar = car;
+      openStage(selectedCircuit);
+    }
+  });
 });
 
 document.querySelectorAll<HTMLButtonElement>("[data-circuit]").forEach((button) => {
-  button.addEventListener("click", () => openStage(getCircuit(button.dataset.circuit ?? null)));
+  button.addEventListener("click", () => openCarSelection(getCircuit(button.dataset.circuit ?? null)));
 });
 
 const previews = [...document.querySelectorAll<HTMLCanvasElement>("[data-car-preview]")].map((previewCanvas) => {
@@ -108,9 +135,10 @@ if (selectedCircuitFromUrl) {
   selectedCar = getCar(selectedCarId);
   openStage(getCircuit(selectedCircuitFromUrl));
 } else if (selectedCarFromUrl) {
-  openCircuitSelection(getCar(selectedCarFromUrl));
+  openCircuitSelection();
 }
 
+mainStartButton.addEventListener("click", () => openCircuitSelection());
 startButton.addEventListener("click", () => {
   if (!game) return;
   startScreen.classList.add("leaving");
@@ -119,13 +147,10 @@ startButton.addEventListener("click", () => {
 });
 
 circuitMenuButton.addEventListener("click", () => {
-  if (selectedCar) openCircuitSelection(selectedCar);
-  else openCarSelection();
+  openCircuitSelection();
 });
-carMenuButton.addEventListener("click", () => {
-  if (selectedCar) openCarSelection();
-  else showScreen(carScreen);
-});
+circuitMainMenuButton.addEventListener("click", () => openMainMenu());
+carCircuitButton.addEventListener("click", () => openCircuitSelection());
 briefingCarButton.addEventListener("click", () => {
   openCarSelection();
 });
@@ -134,7 +159,7 @@ resumeButton.addEventListener("click", () => game?.resume());
 restartButton.addEventListener("click", () => {
   if (selectedCircuit && selectedCar) location.assign(`${location.pathname}?car=${selectedCar.id}&circuit=${selectedCircuit.id}`);
 });
-mainMenuButton.addEventListener("click", () => location.assign(selectedCar ? `${location.pathname}?car=${selectedCar.id}` : location.pathname));
+mainMenuButton.addEventListener("click", () => location.assign(location.pathname));
 failureRestartButton.addEventListener("click", () => {
   if (selectedCircuit && selectedCar) location.assign(`${location.pathname}?car=${selectedCar.id}&circuit=${selectedCircuit.id}`);
 });
