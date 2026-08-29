@@ -17,7 +17,8 @@ import { FormulaDynamics } from "./FormulaDynamics";
 import { RaceCar } from "../scene/Car";
 import { SpeedLines } from "../scene/SpeedLines";
 import { Stage } from "../scene/Stage";
-import { HUD } from "../ui/HUD";
+import type { NearestTrackResult } from "../scene/Stage";
+import { HUD, type HUDTelemetry } from "../ui/HUD";
 import type { CircuitDefinition } from "./Circuit";
 import type { CarDefinition } from "./Cars";
 
@@ -26,6 +27,11 @@ const required = <T extends Element>(selector: string): T => {
   if (!node) throw new Error(`Missing interface element: ${selector}`);
   return node;
 };
+
+const THROTTLE_NEGATIVE = ["ArrowDown", "KeyS"] as const;
+const THROTTLE_POSITIVE = ["ArrowUp", "KeyW"] as const;
+const STEER_NEGATIVE = ["ArrowRight", "KeyD"] as const;
+const STEER_POSITIVE = ["ArrowLeft", "KeyA"] as const;
 
 export class Game {
   private readonly renderer: WebGLRenderer;
@@ -46,6 +52,25 @@ export class Game {
   private readonly cameraTravel = new Vector3();
   private readonly topSpeed: number;
   private readonly formulaDynamics: FormulaDynamics;
+  private readonly dynamicsInput = {
+    dt: 0,
+    drive: 0,
+    steering: 0,
+    braking: false,
+    offroad: false,
+    topSpeed: 0,
+  };
+  private readonly feedback = { longitudinalG: 0, lateralG: 0, slipAngle: 0, aeroLoad: 0 };
+  private readonly hudTelemetry: HUDTelemetry = {
+    speed: 0,
+    elapsed: 0,
+    progress: 0,
+    offroad: false,
+    checkpoint: 0,
+    turn: 0,
+  };
+  private readonly nearest = { index: 0, distance: 0, side: 0 } as NearestTrackResult;
+  private readonly updatedNearest = { index: 0, distance: 0, side: 0 } as NearestTrackResult;
   private heading: number;
   private speed = 0;
   private steering = 0;
@@ -57,12 +82,14 @@ export class Game {
   private raceStarted = false;
   private running = false;
   private paused = false;
+  private disposed = false;
   private progressIndex = 0;
   private nearestIndex = 0;
   private checkpoint = 0;
   private countdown = 3.8;
   private offCourseTime = 0;
   private stuckTime = 0;
+  private lastFov = 62;
 
   constructor(canvas: HTMLCanvasElement, circuit: CircuitDefinition, carDefinition: CarDefinition) {
     this.stage = new Stage(circuit);
@@ -71,7 +98,7 @@ export class Game {
     this.hud = new HUD(this.stage);
     this.startPose = this.stage.startPose();
     this.previousCarPosition = this.startPose.position.clone();
-    this.car = new RaceCar(carDefinition.modelPath);
+    this.car = new RaceCar(carDefinition);
     this.heading = this.startPose.heading;
     this.forward.set(-Math.sin(this.heading), 0, -Math.cos(this.heading));
     this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -109,10 +136,20 @@ export class Game {
   }
 
   async load(): Promise<void> {
-    await this.car.loadGeneratedModel();
+    await Promise.all([this.car.loadGeneratedModel(), this.stage.ready]);
+    if (this.disposed) return;
+    // Compile and render behind the loading screen so model uploads and the
+    // single static shadow pass cannot hitch the first visible race frame.
+    await this.renderer.compileAsync(this.scene, this.camera);
+    if (this.disposed) return;
+    this.renderer.shadowMap.autoUpdate = true;
+    this.renderer.shadowMap.needsUpdate = true;
+    this.renderer.render(this.scene, this.camera);
+    this.renderer.shadowMap.autoUpdate = false;
   }
 
   start(): void {
+    if (this.disposed || this.running) return;
     this.running = true;
     this.hud.show();
     this.clock.start();
@@ -120,7 +157,7 @@ export class Game {
   }
 
   private readonly frame = (): void => {
-    if (!this.running) return;
+    if (this.disposed || !this.running) return;
     const dt = Math.min(0.04, this.clock.getDelta());
     if (!this.paused) this.update(dt);
     this.renderer.render(this.scene, this.camera);
@@ -137,25 +174,24 @@ export class Game {
       }
     }
 
-    const throttle = this.input.axis(["ArrowDown", "KeyS"], ["ArrowUp", "KeyW"]);
+    const throttle = this.input.axis(THROTTLE_NEGATIVE, THROTTLE_POSITIVE);
     const steerTarget = this.raceStarted
-      ? this.input.axis(["ArrowRight", "KeyD"], ["ArrowLeft", "KeyA"])
+      ? this.input.axis(STEER_NEGATIVE, STEER_POSITIVE)
       : 0;
-    const braking = this.input.isDown("Space");
-    const nearest = this.stage.nearest(this.car.root.position, this.nearestIndex);
-    const offroad = Math.abs(nearest.side) > this.stage.roadWidth - 0.7;
+    const braking = this.input.isDownCode("Space");
+    this.stage.nearestInto(this.car.root.position, this.nearestIndex, this.nearest);
+    const offroad = Math.abs(this.nearest.side) > this.stage.roadWidth - 0.7;
     const steerRate = braking ? 10 : 8.5;
     this.steering += (steerTarget - this.steering) * (1 - Math.exp(-steerRate * dt));
-    const motion = this.formulaDynamics.update(this.heading, {
-      dt,
-      drive: this.raceStarted ? throttle : 0,
-      steering: this.raceStarted ? this.steering : 0,
-      // Down/S brakes while moving, then becomes the recoverable reverse
-      // gear once the car has stopped. Space always requests full braking.
-      braking: this.raceStarted && (braking || (throttle < 0 && this.speed > 0.5)),
-      offroad,
-      topSpeed: this.topSpeed,
-    });
+    this.dynamicsInput.dt = dt;
+    this.dynamicsInput.drive = this.raceStarted ? throttle : 0;
+    this.dynamicsInput.steering = this.raceStarted ? this.steering : 0;
+    // Down/S brakes while moving, then becomes the recoverable reverse
+    // gear once the car has stopped. Space always requests full braking.
+    this.dynamicsInput.braking = this.raceStarted && (braking || (throttle < 0 && this.speed > 0.5));
+    this.dynamicsInput.offroad = offroad;
+    this.dynamicsInput.topSpeed = this.topSpeed;
+    const motion = this.formulaDynamics.update(this.heading, this.dynamicsInput);
     this.heading = motion.heading;
     this.speed = motion.speed;
     this.longitudinalG = motion.longitudinalG;
@@ -165,32 +201,39 @@ export class Game {
     this.forward.set(-Math.sin(this.heading), 0, -Math.cos(this.heading));
     this.car.root.position.addScaledVector(this.formulaDynamics.velocity, dt);
 
-    const updated = this.stage.nearest(this.car.root.position, nearest.index);
-    this.nearestIndex = updated.index;
-    if (updated.index > this.progressIndex - 8) this.progressIndex = Math.max(this.progressIndex, updated.index);
-    this.car.root.position.y += (this.stage.roadHeight(updated.index) - this.car.root.position.y) * Math.min(1, dt * 12);
+    this.stage.nearestInto(this.car.root.position, this.nearest.index, this.updatedNearest);
+    this.nearestIndex = this.updatedNearest.index;
+    if (this.updatedNearest.index > this.progressIndex - 8) this.progressIndex = Math.max(this.progressIndex, this.updatedNearest.index);
+    this.car.root.position.y += (this.stage.roadHeight(this.updatedNearest.index) - this.car.root.position.y) * Math.min(1, dt * 12);
     this.car.root.rotation.y = this.heading;
-    this.car.update(this.speed, this.steering, dt, this.elapsed, {
-      longitudinalG: this.longitudinalG,
-      lateralG: this.lateralG,
-      slipAngle: this.slipAngle,
-      aeroLoad: this.aeroLoad,
-    });
+    this.feedback.longitudinalG = this.longitudinalG;
+    this.feedback.lateralG = this.lateralG;
+    this.feedback.slipAngle = this.slipAngle;
+    this.feedback.aeroLoad = this.aeroLoad;
+    this.car.update(this.speed, this.steering, dt, this.elapsed, this.feedback);
     this.speedLines.update(this.car.root.position, this.heading, this.speed, dt);
 
     if (this.raceStarted) this.elapsed += dt;
     const progress = this.progressIndex / (this.stage.samples.length - 1);
-    this.updateCheckpoints(updated.index);
-    const lookAhead = Math.min(this.stage.samples.length - 1, updated.index + 22);
-    const turn = this.stage.tangent(lookAhead).clone().cross(this.stage.tangent(updated.index)).y;
-    this.hud.update({ speed: this.speed, elapsed: this.elapsed, progress, offroad, checkpoint: this.checkpoint, turn });
+    this.updateCheckpoints(this.updatedNearest.index);
+    const lookAhead = Math.min(this.stage.samples.length - 1, this.updatedNearest.index + 22);
+    const lookTangent = this.stage.tangent(lookAhead);
+    const currentTangent = this.stage.tangent(this.updatedNearest.index);
+    const turn = lookTangent.z * currentTangent.x - lookTangent.x * currentTangent.z;
+    this.hudTelemetry.speed = this.speed;
+    this.hudTelemetry.elapsed = this.elapsed;
+    this.hudTelemetry.progress = progress;
+    this.hudTelemetry.offroad = offroad;
+    this.hudTelemetry.checkpoint = this.checkpoint;
+    this.hudTelemetry.turn = turn;
+    this.hud.update(this.hudTelemetry);
 
     this.updateCamera(dt, braking || throttle < 0);
     if (this.checkpoint === this.stage.checkpointIndices.length && this.raceStarted) {
       this.finish();
       return;
     }
-    this.checkFailure(dt, updated.distance, progress);
+    this.checkFailure(dt, this.updatedNearest.distance, progress);
   }
 
   private updateCheckpoints(nearestIndex: number): void {
@@ -260,8 +303,12 @@ export class Game {
     this.camera.lookAt(this.lookGoal);
     this.camera.rotateZ(-this.lateralG * 0.0035);
     const targetFov = 62 + speedEffect * 8;
-    this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 3);
-    this.camera.updateProjectionMatrix();
+    const nextFov = this.camera.fov + (targetFov - this.camera.fov) * Math.min(1, dt * 3);
+    if (Math.abs(nextFov - this.lastFov) > 0.001) {
+      this.camera.fov = nextFov;
+      this.lastFov = nextFov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   private finish(): void {
@@ -302,7 +349,7 @@ export class Game {
   };
 
   resume(): void {
-    if (!this.paused) return;
+    if (!this.paused || this.disposed) return;
     this.paused = false;
     this.clock.getDelta();
     required<HTMLElement>("#pause-screen").classList.remove("visible");
@@ -314,4 +361,20 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(innerWidth, innerHeight, false);
   };
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.running = false;
+    this.paused = false;
+    this.renderer.setAnimationLoop(null);
+    this.hud.hide();
+    globalThis.removeEventListener("resize", this.resize);
+    globalThis.removeEventListener("keydown", this.onGlobalKey);
+    this.input.dispose();
+    this.car.dispose();
+    this.speedLines.dispose();
+    this.stage.dispose();
+    this.renderer.dispose();
+  }
 }

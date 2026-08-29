@@ -148,6 +148,7 @@ export const createSilverstoneMaterials = (): SilverstoneMaterials => {
   }, 1, 1);
   decalMap.colorSpace = SRGBColorSpace;
 
+  let disposed = false;
   const materials: SilverstoneMaterials = {
     asphalt: surfaceMaterial(asphaltMap, 0.94),
     shoulder: surfaceMaterial(shoulderMap, 0.88),
@@ -161,6 +162,8 @@ export const createSilverstoneMaterials = (): SilverstoneMaterials => {
       depthWrite: false,
     }),
     dispose: () => {
+      if (disposed) return;
+      disposed = true;
       [asphaltMap, shoulderMap, runoffMap, grassMap, decalMap].forEach((texture) => texture.dispose());
       [materials.asphalt, materials.shoulder, materials.runoff, materials.grass, materials.decal].forEach((material) => material.dispose());
     },

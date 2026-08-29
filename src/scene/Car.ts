@@ -9,6 +9,7 @@ import {
   MathUtils,
   Mesh,
   MeshBasicMaterial,
+  Material,
   MeshStandardMaterial,
   Object3D,
   SphereGeometry,
@@ -16,9 +17,59 @@ import {
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import type { CarDefinition } from "../core/Cars";
 
 const material = (color: number, roughness = 0.55, metalness = 0.05) =>
   new MeshStandardMaterial({ color, roughness, metalness });
+
+interface PreparedTemplate {
+  scene: Object3D;
+}
+
+const templateCache = new Map<string, Promise<PreparedTemplate>>();
+
+const prepareTemplate = async (path: string, wheelComponents: "static" | "detect"): Promise<PreparedTemplate> => {
+  const cached = templateCache.get(`${path}:${wheelComponents}`);
+  if (cached) return cached;
+  const promise = new GLTFLoader().loadAsync(path).then((gltf) => {
+    const model = gltf.scene;
+    // Meshy authored this vehicle lengthwise on X. Rotate its front from -X
+    // onto the game's -Z forward axis so the chase camera looks at the rear.
+    model.rotation.y = -Math.PI / 2;
+    if (wheelComponents === "detect") {
+      RaceCar.bindGeneratedWheels(model);
+    }
+    model.updateMatrixWorld(true);
+    const bounds = new Box3().setFromObject(model);
+    const size = bounds.getSize(new Vector3());
+    const center = bounds.getCenter(new Vector3());
+    const scale = 5.4 / Math.max(size.x, size.z, 0.001);
+    model.scale.setScalar(scale);
+    model.position.set(-center.x * scale, -center.y * scale + size.y * scale * 0.5 + 0.02, -center.z * scale);
+    model.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = false;
+        child.receiveShadow = true;
+      }
+    });
+    // The template owns the loaded GLTF resources for this browser session.
+    // RaceCar clones share these buffers/materials and only detach their clone.
+    return { scene: model };
+  });
+  templateCache.set(`${path}:${wheelComponents}`, promise);
+  return promise;
+};
+
+const clonePreparedTemplate = (template: PreparedTemplate): { model: Object3D; wheels: Object3D[]; frontWheels: Object3D[] } => {
+  const model = template.scene.clone(true);
+  const wheels: Object3D[] = [];
+  const frontWheels: Object3D[] = [];
+  model.traverse((child) => {
+    if (child.userData.generatedWheel) wheels.push(child);
+    if (child.userData.generatedFrontWheel) frontWheels.push(child);
+  });
+  return { model, wheels, frontWheels };
+};
 
 export interface CarDynamicsFeedback {
   longitudinalG: number;
@@ -32,10 +83,28 @@ export class RaceCar {
   readonly wheels: Object3D[] = [];
   readonly frontWheels: Object3D[] = [];
   private readonly body = new Group();
+  private readonly fallbackGeometries: BufferGeometry[] = [];
+  private readonly fallbackMaterials: Material[] = [];
+  private disposed = false;
+  private generatedModel = false;
+  private readonly wheelComponents: "static" | "detect";
+  private readonly generatedModelPath: string;
 
-  constructor(private readonly generatedModelPath = "./models/formula-car.glb") {
+  constructor(definitionOrPath: CarDefinition | string = "./models/formula-car.glb") {
+    this.generatedModelPath = typeof definitionOrPath === "string" ? definitionOrPath : definitionOrPath.modelPath;
+    this.wheelComponents = typeof definitionOrPath === "string"
+      ? (this.generatedModelPath.includes("retro-force") ? "detect" : "static")
+      : definitionOrPath.wheelComponents;
     this.root.add(this.body);
     this.buildFallback();
+    this.root.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      if (child.geometry && !this.fallbackGeometries.includes(child.geometry)) this.fallbackGeometries.push(child.geometry);
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const value of materials) {
+        if (value && !this.fallbackMaterials.includes(value)) this.fallbackMaterials.push(value);
+      }
+    });
     const contactShadow = new Mesh(
       new CircleGeometry(1, 32),
       new MeshBasicMaterial({ color: 0x07090a, transparent: true, opacity: 0.3, depthWrite: false }),
@@ -45,38 +114,25 @@ export class RaceCar {
     contactShadow.scale.set(1.2, 2.8, 1);
     contactShadow.renderOrder = 2;
     this.root.add(contactShadow);
+    this.fallbackGeometries.push(contactShadow.geometry);
+    this.fallbackMaterials.push(contactShadow.material as Material);
     this.root.scale.setScalar(1.08);
   }
 
   async loadGeneratedModel(): Promise<void> {
+    if (this.disposed || this.generatedModel) return;
     try {
-      const gltf = await new GLTFLoader().loadAsync(this.generatedModelPath);
+      const template = await prepareTemplate(this.generatedModelPath, this.wheelComponents);
+      if (this.disposed) return;
       this.body.clear();
       this.wheels.length = 0;
       this.frontWheels.length = 0;
-      const model = gltf.scene;
-      // Meshy authored this vehicle lengthwise on X. Rotate its front from -X
-      // onto the game's -Z forward axis so the chase camera looks at the rear.
-      model.rotation.y = -Math.PI / 2;
-      this.bindGeneratedWheels(model);
-      model.updateMatrixWorld(true);
-      const bounds = new Box3().setFromObject(model);
-      const size = bounds.getSize(new Vector3());
-      const center = bounds.getCenter(new Vector3());
-      const targetLength = 5.4;
-      const scale = targetLength / Math.max(size.x, size.z, 0.001);
-      model.scale.setScalar(scale);
-      model.position.set(-center.x * scale, -center.y * scale + size.y * scale * 0.5 + 0.02, -center.z * scale);
-      model.traverse((child) => {
-        if (child instanceof Mesh) {
-          // The generated formula mesh contains long, nearly coplanar faces
-          // that produce stretched shadow-map triangles across the circuit.
-          // A compact contact shadow gives a stable result at racing speed.
-          child.castShadow = false;
-          child.receiveShadow = true;
-        }
-      });
+      const clone = clonePreparedTemplate(template);
+      const model = clone.model;
+      this.wheels.push(...clone.wheels);
+      this.frontWheels.push(...clone.frontWheels);
       this.body.add(model);
+      this.generatedModel = true;
     } catch (error) {
       // The procedural car keeps this first version playable until the Meshy
       // model is generated and dropped into public/models.
@@ -84,6 +140,21 @@ export class RaceCar {
         console.warn(`Generated vehicle could not be loaded from ${this.generatedModelPath}; using the built-in car.`, error);
       }
     }
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.root.remove(this.body);
+    this.root.clear();
+    // Procedural fallback resources are instance-owned. GLTF resources are
+    // session-owned by templateCache and deliberately remain alive for clones.
+    for (const geometry of this.fallbackGeometries) geometry.dispose();
+    for (const material of this.fallbackMaterials) material.dispose();
+    this.fallbackGeometries.length = 0;
+    this.fallbackMaterials.length = 0;
+    this.wheels.length = 0;
+    this.frontWheels.length = 0;
   }
 
   update(speed: number, steering: number, dt: number, elapsed: number, feedback?: CarDynamicsFeedback): void {
@@ -113,17 +184,19 @@ export class RaceCar {
    * named wheel nodes. Split the four wheel-shaped connected components into
    * axle-centred pivots so they can roll and the front pair can steer.
    */
-  private bindGeneratedWheels(model: Object3D): boolean {
+  static bindGeneratedWheels(model: Object3D): { wheels: Object3D[]; frontWheels: Object3D[] } {
+    const wheels: Object3D[] = [];
+    const frontWheels: Object3D[] = [];
     let source: Mesh | undefined;
     model.traverse((child) => {
       if (!source && child instanceof Mesh && child.geometry.index && !Array.isArray(child.material)) source = child;
     });
-    if (!source || !source.parent) return false;
+    if (!source || !source.parent) return { wheels, frontWheels };
 
     const geometry = source.geometry;
     const positions = geometry.getAttribute("position");
     const indices = geometry.getIndex();
-    if (!indices) return false;
+    if (!indices) return { wheels, frontWheels };
     const parents = Array.from({ length: positions.count }, (_, index) => index);
     const find = (index: number): number => parents[index] === index
       ? index
@@ -184,7 +257,7 @@ export class RaceCar {
     if (wheelParts.length !== 4) {
       // The formula export is a deliberately fused body mesh; its slick tyres
       // have no visible tread, so static wheel rotation is not noticeable.
-      return false;
+      return { wheels, frontWheels };
     }
 
     const nonIndexed = geometry.toNonIndexed();
@@ -237,12 +310,14 @@ export class RaceCar {
       rollPivot.add(wheel);
       steeringPivot.add(rollPivot);
       assembly.add(steeringPivot);
-      this.wheels.push(rollPivot);
-      if (center.x < 0) this.frontWheels.push(steeringPivot);
+      rollPivot.userData.generatedWheel = true;
+      if (center.x < 0) steeringPivot.userData.generatedFrontWheel = true;
+      wheels.push(rollPivot);
+      if (center.x < 0) frontWheels.push(steeringPivot);
     }
     nonIndexed.dispose();
     geometry.dispose();
-    return true;
+    return { wheels, frontWheels };
   }
 
   private buildFallback(): void {
