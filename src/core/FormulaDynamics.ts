@@ -26,6 +26,14 @@ export interface FormulaDynamicsResult {
  */
 export class FormulaDynamics {
   readonly velocity = new Vector3();
+  readonly result: FormulaDynamicsResult = {
+    heading: 0,
+    speed: 0,
+    aeroLoad: 0,
+    longitudinalG: 0,
+    lateralG: 0,
+    slipAngle: 0,
+  };
   private readonly forward = new Vector3();
   private readonly right = new Vector3();
   private yawRate = 0;
@@ -97,14 +105,13 @@ export class FormulaDynamics {
     const longitudinalG = (longitudinal - this.previousSpeed) / dt / 9.81;
     this.previousSpeed = longitudinal;
 
-    return {
-      heading,
-      speed: longitudinal,
-      aeroLoad,
-      longitudinalG: MathUtils.clamp(longitudinalG, -5.2, 1.6),
-      lateralG: MathUtils.clamp(signedLateralG, -5.2, 5.2),
-      slipAngle: Math.atan2(lateral, Math.max(0.1, Math.abs(longitudinal))),
-    };
+    this.result.heading = heading;
+    this.result.speed = longitudinal;
+    this.result.aeroLoad = aeroLoad;
+    this.result.longitudinalG = MathUtils.clamp(longitudinalG, -5.2, 1.6);
+    this.result.lateralG = MathUtils.clamp(signedLateralG, -5.2, 5.2);
+    this.result.slipAngle = Math.atan2(lateral, Math.max(0.1, Math.abs(longitudinal)));
+    return this.result;
   }
 
   private setAxes(heading: number): void {

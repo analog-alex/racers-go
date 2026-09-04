@@ -25,6 +25,7 @@ export class SpeedLines {
     toneMapped: false,
   });
   private seed = 0x51eed;
+  private disposed = false;
 
   constructor() {
     this.geometry.setAttribute("position", new Float32BufferAttribute(this.positions, 3));
@@ -39,6 +40,7 @@ export class SpeedLines {
   }
 
   update(carPosition: Vector3, heading: number, speed: number, dt: number): void {
+    if (this.disposed) return;
     const absoluteSpeed = Math.abs(speed);
     const intensity = MathUtils.clamp((absoluteSpeed - 18) / 31, 0, 1);
     this.root.visible = intensity > 0.01;
@@ -57,6 +59,14 @@ export class SpeedLines {
     }
     const attribute = this.geometry.getAttribute("position") as Float32BufferAttribute;
     attribute.needsUpdate = true;
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.root.removeFromParent();
+    this.geometry.dispose();
+    this.material.dispose();
   }
 
   private resetLine(index: number, z: number): void {

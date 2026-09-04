@@ -17,13 +17,15 @@ export class CarPreview {
   private lastTime = performance.now();
   private elapsed = 0;
   private running = false;
+  private disposed = false;
+  private loaded = false;
 
   constructor(private readonly canvas: HTMLCanvasElement, definition: CarDefinition) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.toneMappingExposure = 1.1;
     this.scene.background = new Color(0x102722);
-    this.car = new RaceCar(definition.modelPath);
+    this.car = new RaceCar(definition);
     this.car.root.position.y = -0.05;
     this.scene.add(this.car.root);
     this.scene.add(new AmbientLight(0xf8f4df, 2.4));
@@ -37,22 +39,45 @@ export class CarPreview {
     this.camera.lookAt(0, 0.35, 0);
     this.resize();
     globalThis.addEventListener("resize", this.resize);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
   }
 
   async load(): Promise<void> {
+    if (this.disposed || this.loaded) return;
     await this.car.loadGeneratedModel();
+    if (this.disposed) return;
+    this.loaded = true;
     this.resize();
-    this.render();
+    if (this.running && document.visibilityState !== "hidden") this.render();
   }
 
   start(): void {
-    if (this.running) return;
+    if (this.disposed || this.running || document.visibilityState === "hidden") return;
     this.running = true;
     this.lastTime = performance.now();
     this.renderer.setAnimationLoop(this.frame);
   }
 
+  stop(): void {
+    if (!this.running) return;
+    this.running = false;
+    this.renderer.setAnimationLoop(null);
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.stop();
+    globalThis.removeEventListener("resize", this.resize);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    this.scene.remove(this.car.root);
+    this.car.dispose();
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
+  }
+
   private readonly frame = (): void => {
+    if (this.disposed || !this.running || document.visibilityState === "hidden") return;
     const now = performance.now();
     const dt = Math.min(0.04, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
@@ -62,11 +87,16 @@ export class CarPreview {
     this.render();
   };
 
+  private readonly onVisibilityChange = (): void => {
+    if (document.visibilityState === "hidden") this.stop();
+  };
+
   private readonly render = (): void => {
     this.renderer.render(this.scene, this.camera);
   };
 
   private readonly resize = (): void => {
+    if (this.disposed) return;
     const width = Math.max(1, this.canvas.clientWidth || this.canvas.width || 1);
     const height = Math.max(1, this.canvas.clientHeight || this.canvas.height || 1);
     this.renderer.setSize(width, height, false);
@@ -74,4 +104,3 @@ export class CarPreview {
     this.camera.updateProjectionMatrix();
   };
 }
-

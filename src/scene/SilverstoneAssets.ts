@@ -16,6 +16,8 @@ export interface SilverstonePlacementStage {
   tangent(index: number): Vector3;
   /** Optional because older/custom Stage implementations can derive it. */
   normal?(index: number): Vector3;
+  isDisposed?(): boolean;
+  isGenerationCurrent?(generation: symbol): boolean;
 }
 
 export interface SilverstoneAssetPlacement {
@@ -45,12 +47,19 @@ export interface SilverstoneAssetOptions {
   /** Set false to use the model's authored scale unchanged. */
   readonly normalize?: boolean;
   readonly onError?: (url: string, error: unknown) => void;
+  readonly generation?: symbol;
 }
 
 export interface SilverstoneAssetLoadResult {
   readonly group: Group;
   readonly loaded: readonly string[];
   readonly missing: readonly string[];
+}
+
+interface ProcessedSilverstoneAsset {
+  readonly scene: Object3D;
+  readonly bounds: Box3;
+  readonly authoredHeight: number;
 }
 
 const DEFAULT_PLACEMENTS: readonly SilverstoneAssetPlacement[] = [
@@ -68,6 +77,7 @@ const DEFAULT_PLACEMENTS: readonly SilverstoneAssetPlacement[] = [
 ];
 
 const gltfCache = new Map<string, Promise<GLTF>>();
+const processedCache = new Map<string, Promise<ProcessedSilverstoneAsset>>();
 
 const clampIndex = (index: number, length: number): number =>
   Math.max(0, Math.min(Math.max(0, length - 1), Math.round(index)));
@@ -96,13 +106,33 @@ const setQuality = (object: Object3D): void => {
   });
 };
 
-const normalizedScale = (object: Object3D, targetHeight?: number): number => {
+const processedAsset = (url: string, loader: GLTFLoader): Promise<ProcessedSilverstoneAsset> => {
+  const cached = processedCache.get(url);
+  if (cached) return cached;
+  const promise = (async (): Promise<ProcessedSilverstoneAsset> => {
+    let load = gltfCache.get(url);
+    if (!load) {
+      load = loader.loadAsync(url);
+      gltfCache.set(url, load);
+    }
+    const gltf = await load;
+    setQuality(gltf.scene);
+    const bounds = new Box3().setFromObject(gltf.scene);
+    const size = bounds.getSize(new Vector3());
+    return {
+      scene: gltf.scene,
+      bounds,
+      authoredHeight: size.y > 0 ? size.y : Math.max(size.x, size.z),
+    };
+  })();
+  processedCache.set(url, promise);
+  return promise;
+};
+
+const normalizedScale = (authoredHeight: number, targetHeight?: number): number => {
   if (!targetHeight || targetHeight <= 0) return 1;
-  const bounds = new Box3().setFromObject(object);
-  const size = bounds.getSize(new Vector3());
   // Asset authors generally model the building upright, so its Y extent is
   // the useful physical height. Keep a defensive fallback for flat exports.
-  const authoredHeight = size.y > 0 ? size.y : Math.max(size.x, size.z);
   return authoredHeight > 0 ? targetHeight / authoredHeight : 1;
 };
 
@@ -129,19 +159,16 @@ export async function loadSilverstoneAssets(
   const normalize = options.normalize ?? true;
 
   await Promise.all(placements.map(async (placement) => {
+    if (stage.isDisposed?.() || (options.generation !== undefined && stage.isGenerationCurrent && !stage.isGenerationCurrent(options.generation))) return;
     const url = placement.url.startsWith("/") || placement.url.startsWith("http")
       ? placement.url
       : `${basePath.replace(/\/$/, "")}/${placement.url}`;
     try {
-      let load = gltfCache.get(url);
-      if (!load) {
-        load = loader.loadAsync(url);
-        gltfCache.set(url, load);
-      }
-      const gltf = await load;
-      const instance = gltf.scene.clone(true);
+      const source = await processedAsset(url, loader);
+      if (stage.isDisposed?.() || (options.generation !== undefined && stage.isGenerationCurrent && !stage.isGenerationCurrent(options.generation))) return;
+      const instance = source.scene.clone(true);
       instance.name = `silverstone-${placement.url.split("/").pop()?.replace(/\.glb$/i, "") ?? "asset"}`;
-      const scale = (normalize ? normalizedScale(instance, placement.targetHeight) : 1) * (placement.scale ?? 1);
+      const scale = (normalize ? normalizedScale(source.authoredHeight, placement.targetHeight) : 1) * (placement.scale ?? 1);
       instance.scale.setScalar(scale);
 
       const sampleIndex = clampIndex(placement.sampleIndex, stage.samples.length);
@@ -155,12 +182,16 @@ export async function loadSilverstoneAssets(
       instance.rotation.set(0, Math.atan2(tangent.x, tangent.z) + (placement.yaw ?? 0), 0);
 
       if (placement.anchorBottom ?? true) {
-        const bounds = new Box3().setFromObject(instance);
-        instance.position.y += sample.y + (placement.elevation ?? 0) - bounds.min.y;
+        instance.position.y += sample.y + (placement.elevation ?? 0) - source.bounds.min.y * scale;
       } else {
         instance.position.y += sample.y + (placement.elevation ?? 0);
       }
-      setQuality(instance);
+      // Clones share the immutable cached geometry/material resources. Stage
+      // teardown detaches these instances but intentionally never disposes
+      // their shared source buffers.
+      instance.traverse((object) => {
+        object.userData.sharedResource = true;
+      });
       group.add(instance);
       loaded.push(url);
     } catch (error) {

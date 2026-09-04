@@ -10,6 +10,8 @@ export interface CarDefinition {
   description: string;
   topSpeed: string;
   handling: string;
+  /** Whether wheel pivots are authored in the model or need one-time detection. */
+  wheelComponents: "static" | "detect";
 }
 
 export const CARS: Record<CarId, CarDefinition> = {
@@ -23,6 +25,7 @@ export const CARS: Record<CarId, CarDefinition> = {
     description: "A precise, lightweight F1 machine built for fast direction changes and tidy exits.",
     topSpeed: "310 KM/H",
     handling: "PRECISION",
+    wheelComponents: "static",
   },
   "retro-force": {
     id: "retro-force",
@@ -34,6 +37,7 @@ export const CARS: Record<CarId, CarDefinition> = {
     description: "A black-and-yellow love letter to classic Grand Prix cars with today's F1 attitude.",
     topSpeed: "302 KM/H",
     handling: "BALANCED",
+    wheelComponents: "detect",
   },
 };
 

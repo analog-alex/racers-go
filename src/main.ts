@@ -32,6 +32,36 @@ const selectedCarId = selectedCarFromUrl === "retro-force" ? selectedCarFromUrl 
 let selectedCircuit: CircuitDefinition | null = null;
 let selectedCar: CarDefinition | null = null;
 let game: Game | null = null;
+let previewInstances: CarPreview[] = [];
+let previewsCreated = false;
+let previewLoadGeneration = 0;
+
+const ensurePreviews = (): void => {
+  if (previewsCreated) return;
+  previewsCreated = true;
+  const generation = ++previewLoadGeneration;
+  previewInstances = [...document.querySelectorAll<HTMLCanvasElement>("[data-car-preview]")].map((previewCanvas) => {
+    const preview = new CarPreview(previewCanvas, getCar(previewCanvas.dataset.carPreview ?? null));
+    void preview.load().then(() => {
+      if (generation === previewLoadGeneration && carScreen.classList.contains("visible") && document.visibilityState !== "hidden") {
+        preview.start();
+      }
+    });
+    return preview;
+  });
+};
+
+const stopPreviews = (): void => {
+  previewLoadGeneration += 1;
+  for (const preview of previewInstances) preview.stop();
+};
+
+const disposePreviews = (): void => {
+  previewLoadGeneration += 1;
+  for (const preview of previewInstances) preview.dispose();
+  previewInstances = [];
+  previewsCreated = false;
+};
 
 const setText = (selector: string, value: string): void => {
   const node = document.querySelector<HTMLElement>(selector);
@@ -46,15 +76,27 @@ const syncUrl = (): void => {
   history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}`);
 };
 
+const disposeGame = (): void => {
+  game?.dispose();
+  game = null;
+};
+
 const showScreen = (screen: HTMLElement): void => {
   for (const candidate of [mainMenu, carScreen, circuitScreen, startScreen]) {
     const isVisible = candidate === screen;
     candidate.classList.toggle("visible", isVisible);
     if (candidate === mainMenu) candidate.setAttribute("aria-hidden", String(!isVisible));
   }
+  if (screen === carScreen) {
+    ensurePreviews();
+    if (document.visibilityState !== "hidden") for (const preview of previewInstances) preview.start();
+  } else {
+    stopPreviews();
+  }
 };
 
 const openMainMenu = (): void => {
+  disposeGame();
   selectedCar = null;
   selectedCircuit = null;
   document.body.dataset.car = "";
@@ -64,6 +106,7 @@ const openMainMenu = (): void => {
 };
 
 const openCircuitSelection = (): void => {
+  disposeGame();
   selectedCar = null;
   selectedCircuit = null;
   document.body.dataset.car = "";
@@ -77,6 +120,7 @@ const openCarSelection = (circuit: CircuitDefinition | null = selectedCircuit): 
     openCircuitSelection();
     return;
   }
+  disposeGame();
   selectedCar = null;
   selectedCircuit = circuit;
   document.body.dataset.car = "";
@@ -106,8 +150,15 @@ const openStage = (circuit: CircuitDefinition): void => {
   setText("#control-tip-label", "Brake");
   showScreen(startScreen);
   loading.classList.add("visible");
-  game = new Game(canvas, circuit, car);
-  void game.load().finally(() => loading.classList.remove("visible"));
+  stopPreviews();
+  disposeGame();
+  const nextGame = new Game(canvas, circuit, car);
+  game = nextGame;
+  void nextGame.load().catch((error) => {
+    if (game === nextGame) console.error("Unable to load race assets.", error);
+  }).finally(() => {
+    if (game === nextGame) loading.classList.remove("visible");
+  });
 };
 
 document.querySelectorAll<HTMLButtonElement>("[data-car]").forEach((button) => {
@@ -124,12 +175,16 @@ document.querySelectorAll<HTMLButtonElement>("[data-circuit]").forEach((button) 
   button.addEventListener("click", () => openCarSelection(getCircuit(button.dataset.circuit ?? null)));
 });
 
-const previews = [...document.querySelectorAll<HTMLCanvasElement>("[data-car-preview]")].map((previewCanvas) => {
-  const preview = new CarPreview(previewCanvas, getCar(previewCanvas.dataset.carPreview ?? null));
-  void preview.load().then(() => preview.start());
-  return preview;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") stopPreviews();
+  else if (carScreen.classList.contains("visible")) {
+    for (const preview of previewInstances) preview.start();
+  }
 });
-void previews;
+globalThis.addEventListener("pagehide", () => {
+  disposeGame();
+  disposePreviews();
+}, { once: true });
 
 if (selectedCircuitFromUrl) {
   selectedCar = getCar(selectedCarId);
