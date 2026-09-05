@@ -13,6 +13,8 @@ import {
   MeshStandardMaterial,
   Object3D,
   SphereGeometry,
+  RingGeometry,
+  DoubleSide,
   Vector3,
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -28,7 +30,7 @@ interface PreparedTemplate {
 
 const templateCache = new Map<string, Promise<PreparedTemplate>>();
 
-const prepareTemplate = async (path: string, wheelComponents: "static" | "detect"): Promise<PreparedTemplate> => {
+const prepareTemplate = async (path: string, wheelComponents: CarDefinition["wheelComponents"]): Promise<PreparedTemplate> => {
   const cached = templateCache.get(`${path}:${wheelComponents}`);
   if (cached) return cached;
   const promise = new GLTFLoader().loadAsync(path).then((gltf) => {
@@ -36,8 +38,8 @@ const prepareTemplate = async (path: string, wheelComponents: "static" | "detect
     // Meshy authored this vehicle lengthwise on X. Rotate its front from -X
     // onto the game's -Z forward axis so the chase camera looks at the rear.
     model.rotation.y = -Math.PI / 2;
-    if (wheelComponents === "detect") {
-      RaceCar.bindGeneratedWheels(model);
+    if (wheelComponents === "detect" || wheelComponents === "detect-road" || wheelComponents === "regions") {
+      RaceCar.bindGeneratedWheels(model, wheelComponents === "regions", wheelComponents === "detect-road");
     }
     model.updateMatrixWorld(true);
     const bounds = new Box3().setFromObject(model);
@@ -48,6 +50,15 @@ const prepareTemplate = async (path: string, wheelComponents: "static" | "detect
     model.position.set(-center.x * scale, -center.y * scale + size.y * scale * 0.5 + 0.02, -center.z * scale);
     model.traverse((child) => {
       if (child instanceof Mesh) {
+        if (path.includes("tesla-model-y")) {
+          const values = Array.isArray(child.material) ? child.material : [child.material];
+          // Meshy's downloaded texture is bright studio silver; a restrained
+          // neutral tint makes the road car read as light grey in our daylight
+          // scene without replacing its PBR map.
+          for (const value of values) {
+            if (value instanceof MeshStandardMaterial) value.color.setRGB(0.76, 0.78, 0.80);
+          }
+        }
         child.castShadow = false;
         child.receiveShadow = true;
       }
@@ -83,17 +94,19 @@ export class RaceCar {
   readonly wheels: Object3D[] = [];
   readonly frontWheels: Object3D[] = [];
   private readonly body = new Group();
+  private readonly wheelScale = new Vector3();
   private readonly fallbackGeometries: BufferGeometry[] = [];
   private readonly fallbackMaterials: Material[] = [];
   private disposed = false;
   private generatedModel = false;
-  private readonly wheelComponents: "static" | "detect";
+  private readonly wheelComponents: CarDefinition["wheelComponents"];
   private readonly generatedModelPath: string;
 
   constructor(definitionOrPath: CarDefinition | string = "./models/formula-car.glb") {
     this.generatedModelPath = typeof definitionOrPath === "string" ? definitionOrPath : definitionOrPath.modelPath;
     this.wheelComponents = typeof definitionOrPath === "string"
-      ? (this.generatedModelPath.includes("retro-force") ? "detect" : "static")
+      ? (this.generatedModelPath.includes("retro-force") ? "detect"
+        : this.generatedModelPath.includes("formula-car") ? "regions" : "static")
       : definitionOrPath.wheelComponents;
     this.root.add(this.body);
     this.buildFallback();
@@ -159,8 +172,11 @@ export class RaceCar {
 
   update(speed: number, steering: number, dt: number, elapsed: number, feedback?: CarDynamicsFeedback): void {
     for (const wheel of this.wheels) {
-      if (wheel.userData.rollAxis === "z") wheel.rotateZ(speed * dt * 0.42);
-      else wheel.rotateX(speed * dt * 0.42);
+      wheel.getWorldScale(this.wheelScale);
+      const radius = (wheel.userData.radius ?? 0.47) * Math.abs(this.wheelScale.y);
+      const angle = speed * dt / Math.max(radius, 0.05);
+      if (wheel.userData.rollAxis === "z") wheel.rotateZ(angle);
+      else wheel.rotateX(-angle);
     }
     for (const wheel of this.frontWheels) wheel.rotation.y = steering * 0.38;
     if (feedback) {
@@ -184,7 +200,7 @@ export class RaceCar {
    * named wheel nodes. Split the four wheel-shaped connected components into
    * axle-centred pivots so they can roll and the front pair can steer.
    */
-  static bindGeneratedWheels(model: Object3D): { wheels: Object3D[]; frontWheels: Object3D[] } {
+  static bindGeneratedWheels(model: Object3D, fused = false, roadCar = false): { wheels: Object3D[]; frontWheels: Object3D[] } {
     const wheels: Object3D[] = [];
     const frontWheels: Object3D[] = [];
     let source: Mesh | undefined;
@@ -246,17 +262,46 @@ export class RaceCar {
       }
     }
 
-    const wheelParts = [...components.values()].filter((component) => {
+    geometry.computeBoundingBox();
+    const modelLength = geometry.boundingBox!.max.x - geometry.boundingBox!.min.x;
+    let wheelParts = [...components.values()].filter((component) => {
       const size = component.max.clone().sub(component.min);
       const center = component.min.clone().add(component.max).multiplyScalar(0.5);
-      return size.x > 0.45 && size.x < 0.8
-        && size.y > 0.45 && size.y < 0.8
-        && size.z > 0.12 && size.z < 0.3
-        && center.y < 0.5;
+      if (roadCar) {
+        const bounds = geometry.boundingBox!;
+        const height = bounds.max.y - bounds.min.y;
+        return size.x > modelLength * 0.11 && size.x < modelLength * 0.20
+          && size.y > modelLength * 0.11 && size.y < modelLength * 0.20
+          && size.z > modelLength * 0.025 && size.z < modelLength * 0.10
+          && center.y < bounds.min.y + height * 0.45;
+      }
+      return size.x > modelLength * 0.13 && size.x < modelLength * 0.19
+        && size.y > modelLength * 0.13 && size.y < modelLength * 0.19
+        && size.z > modelLength * 0.07 && size.z < modelLength * 0.13
+        && center.y < 0;
     });
-    if (wheelParts.length !== 4) {
-      // The formula export is a deliberately fused body mesh; its slick tyres
-      // have no visible tread, so static wheel rotation is not noticeable.
+    if (fused) {
+      // The Formula asset has suspension welded into its tyres. Its authored
+      // axle regions separate those tyres without moving or replacing the body.
+      const unit = modelLength / 2;
+      wheelParts = [-0.536, 0.752].flatMap((axle) => [-1, 1].map((side) => ({
+        triangles: [] as number[],
+        min: new Vector3((axle - 0.153) * unit, -0.240 * unit, (side < 0 ? -0.434 : 0.25) * unit),
+        max: new Vector3((axle + 0.153) * unit, 0.053 * unit, (side < 0 ? -0.25 : 0.434) * unit),
+      })));
+      for (let triangle = 0; triangle < indices.count / 3; triangle += 1) {
+        const center = new Vector3();
+        for (let corner = 0; corner < 3; corner++) {
+          center.add(new Vector3().fromBufferAttribute(positions, indices.getX(triangle * 3 + corner)));
+        }
+        center.multiplyScalar(1 / 3);
+        const part = wheelParts.find((part) => center.x >= part.min.x && center.x <= part.max.x
+          && center.y >= part.min.y && center.y <= part.max.y
+          && center.z >= part.min.z && center.z <= part.max.z);
+        part?.triangles.push(triangle);
+      }
+    }
+    if (wheelParts.length !== 4 || wheelParts.some((part) => part.triangles.length === 0)) {
       return { wheels, frontWheels };
     }
 
@@ -305,6 +350,15 @@ export class RaceCar {
       steeringPivot.position.copy(center);
       const rollPivot = new Group();
       rollPivot.userData.rollAxis = "z";
+      const radius = (component.max.y - component.min.y) / 2;
+      rollPivot.userData.radius = radius;
+      // A small sidewall paint arc makes slick tyre rotation readable.
+      const marker = new Mesh(
+        new RingGeometry(radius * 0.76, radius * 0.86, 16, 1, 0.2, 0.7),
+        new MeshStandardMaterial({ color: 0xd8c485, roughness: 0.9, side: DoubleSide }),
+      );
+      marker.position.z = Math.sign(center.z) * ((component.max.z - component.min.z) / 2 + radius * 0.012);
+      rollPivot.add(marker);
       const wheel = new Mesh(makeGeometry(component.triangles), source.material);
       wheel.position.copy(center).multiplyScalar(-1);
       rollPivot.add(wheel);

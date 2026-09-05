@@ -3,6 +3,7 @@ import {
   Color,
   DoubleSide,
   LinearFilter,
+  LinearMipmapLinearFilter,
   MeshStandardMaterial,
   RepeatWrapping,
   SRGBColorSpace,
@@ -46,7 +47,7 @@ const makeTexture = (
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.repeat.set(repeatX, repeatY);
-  texture.minFilter = LinearFilter;
+  texture.minFilter = LinearMipmapLinearFilter;
   texture.magFilter = LinearFilter;
   // Safe default for track surfaces; renderers clamp to their supported maximum.
   texture.anisotropy = 8;
@@ -74,9 +75,7 @@ const speckles = (
 };
 
 const surfaceMaterial = (map: CanvasTexture, roughness: number): MeshStandardMaterial =>
-  // Track ribbons can reverse winding as their Catmull-Rom normals turn around
-  // tight corners, so keep both faces renderable instead of exposing the grass
-  // plane underneath on half of the lap.
+  // Also render the underside of elevated road sections.
   new MeshStandardMaterial({ map, roughness, metalness: 0, side: DoubleSide });
 
 /**
@@ -84,60 +83,33 @@ const surfaceMaterial = (map: CanvasTexture, roughness: number): MeshStandardMat
  * Both circuits use the same tarmac, runoff, and grass materials.
  */
 export const createSilverstoneMaterials = (): SilverstoneMaterials => {
+  // Restrained colour variation keeps the racing line readable at speed.
   const asphaltMap = makeTexture(256, 256, (context, random) => {
-    context.fillStyle = "#30363a";
+    context.fillStyle = "#42474a";
     context.fillRect(0, 0, 256, 256);
-    speckles(context, random, 2100, "#aab0af", 1.15);
-    speckles(context, random, 1200, "#111719", 0.9);
-    context.strokeStyle = "rgba(210,215,210,.08)";
-    context.lineWidth = 0.65;
-    for (let index = 0; index < 22; index += 1) {
-      const y = random() * 256;
-      context.beginPath();
-      context.moveTo(0, y);
-      context.lineTo(256, y + (random() - 0.5) * 8);
-      context.stroke();
-    }
-  }, 7, 7);
+    // Fine, closely packed aggregate gives motion cues without the large
+    // pale flecks that made the previous surface read like loose gravel.
+    speckles(context, random, 6200, "#899094", 0.7);
+    speckles(context, random, 4400, "#20272b", 0.9);
+    speckles(context, random, 1600, "#adb1af", 0.35);
+  }, 6, 6);
 
-  const shoulderMap = makeTexture(256, 256, (context, random) => {
-    context.fillStyle = "#7d8585";
+  const shoulderMap = makeTexture(256, 256, (context) => {
+    context.fillStyle = "#7e8683";
     context.fillRect(0, 0, 256, 256);
-    speckles(context, random, 1200, "#d2d0c1", 1.5);
-    speckles(context, random, 500, "#424b4d", 1.2);
-  }, 5, 5);
+  }, 1, 1);
 
-  const runoffMap = makeTexture(256, 256, (context, random) => {
-    context.fillStyle = "#5f7d75";
+  const runoffMap = makeTexture(256, 256, (context) => {
+    context.fillStyle = "#429d92";
     context.fillRect(0, 0, 256, 256);
-    speckles(context, random, 800, "#94a79d", 1.2);
-    speckles(context, random, 360, "#334e4d", 1.1);
-    context.strokeStyle = "rgba(225,232,218,.12)";
-    context.lineWidth = 1;
-    for (let x = -256; x < 512; x += 22) {
-      context.beginPath();
-      context.moveTo(x, 0);
-      context.lineTo(x + 256, 256);
-      context.stroke();
-    }
-  }, 3, 3);
+  }, 1, 1);
 
   const grassMap = makeTexture(256, 256, (context, random) => {
-    context.fillStyle = "#3e5543";
+    context.fillStyle = "#586d3d";
     context.fillRect(0, 0, 256, 256);
-    speckles(context, random, 1600, "#73805b", 1.6);
-    speckles(context, random, 900, "#263b33", 1.25);
-    context.strokeStyle = "rgba(154,165,111,.2)";
-    context.lineWidth = 0.8;
-    for (let index = 0; index < 500; index += 1) {
-      const x = random() * 256;
-      const y = random() * 256;
-      context.beginPath();
-      context.moveTo(x, y + 2);
-      context.lineTo(x + (random() - 0.5) * 2, y - 2 - random() * 3);
-      context.stroke();
-    }
-  }, 4, 4);
+    speckles(context, random, 4800, "#8a955a", 1.1);
+    speckles(context, random, 2200, "#364d2c", 1.3);
+  }, 60, 45);
 
   const decalMap = makeTexture(256, 64, (context, random) => {
     context.clearRect(0, 0, 256, 64);

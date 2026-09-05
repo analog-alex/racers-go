@@ -93,9 +93,9 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement, circuit: CircuitDefinition, carDefinition: CarDefinition) {
     this.stage = new Stage(circuit);
-    this.topSpeed = 94;
-    this.formulaDynamics = new FormulaDynamics();
-    this.hud = new HUD(this.stage);
+    this.topSpeed = carDefinition.performance?.topSpeed ?? 94;
+    this.formulaDynamics = new FormulaDynamics(carDefinition.performance);
+    this.hud = new HUD(this.stage, carDefinition.id === "model-y");
     this.startPose = this.stage.startPose();
     this.previousCarPosition = this.startPose.position.clone();
     this.car = new RaceCar(carDefinition);
@@ -105,17 +105,17 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMappingExposure = 1.02;
 
-    this.scene.background = new Color(0x9baeb8);
-    this.scene.fog = new FogExp2(0xb3c0c2, 0.0024);
+    this.scene.background = new Color(0x79b1dc);
+    this.scene.fog = new FogExp2(0xc2d8e3, 0.00085);
     this.scene.add(this.stage.root, this.car.root, this.speedLines.root);
     this.car.root.position.copy(this.startPose.position);
     this.car.root.rotation.y = this.heading;
 
-    this.scene.add(new HemisphereLight(0xdff4ff, 0x343c42, 2.5));
-    this.scene.add(new AmbientLight(0xffffff, 0.6));
-    const sun = new DirectionalLight(0xfff1c7, 4.2);
+    this.scene.add(new HemisphereLight(0xdceeff, 0x455238, 1.35));
+    this.scene.add(new AmbientLight(0xffffff, 0.25));
+    const sun = new DirectionalLight(0xfff3db, 3.6);
     sun.position.set(-160, 220, 80);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
