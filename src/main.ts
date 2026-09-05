@@ -28,7 +28,7 @@ if (!canvas || !mainMenu || !mainStartButton || !carScreen || !circuitScreen || 
 const params = new URLSearchParams(location.search);
 const selectedCarFromUrl = params.get("car");
 const selectedCircuitFromUrl = params.get("circuit");
-const selectedCarId = selectedCarFromUrl === "retro-force" ? selectedCarFromUrl : "formula";
+const selectedCarId = getCar(selectedCarFromUrl).id;
 let selectedCircuit: CircuitDefinition | null = null;
 let selectedCar: CarDefinition | null = null;
 let game: Game | null = null;

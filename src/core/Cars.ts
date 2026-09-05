@@ -1,4 +1,4 @@
-export type CarId = "formula" | "retro-force";
+export type CarId = "formula" | "retro-force" | "model-y";
 
 export interface CarDefinition {
   id: CarId;
@@ -10,8 +10,10 @@ export interface CarDefinition {
   description: string;
   topSpeed: string;
   handling: string;
-  /** Whether wheel pivots are authored in the model or need one-time detection. */
-  wheelComponents: "static" | "detect";
+  /** Game tuning, not a manufacturer specification. Existing Formula cars retain their defaults. */
+  performance?: { topSpeed: number; acceleration: number; braking: number; grip: number; aero: number; wheelbase: number };
+  /** Keep static, detect separate parts, or split the Formula asset at its axle regions. */
+  wheelComponents: "static" | "detect" | "detect-road" | "regions" | "authored";
 }
 
 export const CARS: Record<CarId, CarDefinition> = {
@@ -25,7 +27,7 @@ export const CARS: Record<CarId, CarDefinition> = {
     description: "A precise, lightweight F1 machine built for fast direction changes and tidy exits.",
     topSpeed: "310 KM/H",
     handling: "PRECISION",
-    wheelComponents: "static",
+    wheelComponents: "regions",
   },
   "retro-force": {
     id: "retro-force",
@@ -39,7 +41,20 @@ export const CARS: Record<CarId, CarDefinition> = {
     handling: "BALANCED",
     wheelComponents: "detect",
   },
+  "model-y": {
+    id: "model-y",
+    code: "CAR 03",
+    name: "Tesla Model Y",
+    modelPath: "./models/tesla-model-y.glb",
+    category: "Electric crossover",
+    tagline: "Quiet power. A different kind of racing line.",
+    description: "A stylized electric road car with a relaxed pace, softer cornering, and everyday character.",
+    topSpeed: "210 KM/H",
+    handling: "ROAD",
+    wheelComponents: "static",
+    performance: { topSpeed: 210 / 3.6, acceleration: 0.55, braking: 0.62, grip: 0.72, aero: 0.08, wheelbase: 3.0 },
+  },
 };
 
 export const getCar = (id: string | null): CarDefinition =>
-  id === "retro-force" ? CARS["retro-force"] : CARS.formula;
+  id === "model-y" ? CARS["model-y"] : id === "retro-force" ? CARS["retro-force"] : CARS.formula;

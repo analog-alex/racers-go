@@ -1,4 +1,5 @@
 import { MathUtils, Vector3 } from "three";
+import type { CarDefinition } from "./Cars";
 
 export interface FormulaDynamicsInput {
   dt: number;
@@ -39,21 +40,27 @@ export class FormulaDynamics {
   private yawRate = 0;
   private previousSpeed = 0;
 
+  private readonly tuning: NonNullable<CarDefinition["performance"]>;
+
+  constructor(tuning?: CarDefinition["performance"]) {
+    this.tuning = tuning ?? { topSpeed: 94, acceleration: 1, braking: 1, grip: 1, aero: 1, wheelbase: 3.55 };
+  }
+
   update(heading: number, input: FormulaDynamicsInput): FormulaDynamicsResult {
     const dt = Math.max(0.001, Math.min(0.04, input.dt));
     this.setAxes(heading);
     let longitudinal = this.velocity.dot(this.forward);
     const absoluteSpeed = Math.abs(longitudinal);
     const speedRatio = MathUtils.clamp(absoluteSpeed / input.topSpeed, 0, 1);
-    const aeroLoad = speedRatio * speedRatio;
+    const aeroLoad = speedRatio * speedRatio * this.tuning.aero;
 
     // The wheelbase term gives the familiar bicycle-model yaw response. Limit
     // it with the lateral acceleration the tyres and aero can currently carry.
     const steeringBlend = MathUtils.smoothstep(absoluteSpeed, 12, input.topSpeed);
     const maxSteeringAngle = MathUtils.lerp(0.3, 0.072, steeringBlend);
     const steeringAngle = input.steering * maxSteeringAngle;
-    const wheelbase = 3.55;
-    const lateralAccelerationLimit = input.offroad ? 7.5 : 13 + aeroLoad * 34;
+    const wheelbase = this.tuning.wheelbase;
+    const lateralAccelerationLimit = input.offroad ? 7.5 : 13 * this.tuning.grip + aeroLoad * 34;
     const rawYawRate = longitudinal / wheelbase * Math.tan(steeringAngle);
     const yawLimit = lateralAccelerationLimit / Math.max(6, absoluteSpeed);
     const targetYawRate = MathUtils.clamp(rawYawRate, -yawLimit, yawLimit) * (input.offroad ? 0.52 : 1);
@@ -72,12 +79,12 @@ export class FormulaDynamics {
     let acceleration = 0;
     if (input.braking && wasMovingForward) {
       // Aero load lets an F1 car brake hardest at the beginning of a stop.
-      const brakeDeceleration = MathUtils.lerp(21, 49, aeroLoad);
+      const brakeDeceleration = MathUtils.lerp(21, 49, aeroLoad) * this.tuning.braking;
       acceleration = -brakeDeceleration;
       longitudinal = Math.max(0, longitudinal + acceleration * dt);
     } else if (input.drive > 0) {
       // Strong launch acceleration tapers into an aero/drag-limited top speed.
-      const engineAcceleration = 14.5 * (1 - speedRatio * 0.74);
+      const engineAcceleration = 14.5 * this.tuning.acceleration * (1 - speedRatio * 0.74);
       // Grass and gravel should cost speed, not strand the car. Keep enough
       // low-speed wheel force to pull away from a stop and recover the track.
       acceleration = Math.min(input.offroad ? 8.5 : 13.6, engineAcceleration) * input.drive;
@@ -93,7 +100,7 @@ export class FormulaDynamics {
     const speedLimit = input.offroad ? Math.min(40, input.topSpeed) : input.topSpeed;
     longitudinal = MathUtils.clamp(longitudinal, -12, speedLimit);
 
-    const corneringResponse = input.offroad ? 2.1 : 5.5 + aeroLoad * 10;
+    const corneringResponse = input.offroad ? 2.1 : 5.5 * this.tuning.grip + aeroLoad * 10;
     lateral *= Math.exp(-corneringResponse * dt);
     const maximumSlipSpeed = input.offroad
       ? Math.abs(longitudinal) * 0.34 + 1.5

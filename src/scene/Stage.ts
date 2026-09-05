@@ -86,6 +86,8 @@ export class Stage {
   readonly checkpointIndices = [140, 280, 420, 560, 700] as const;
   /** Optional scenery is part of stage readiness, including decode/upload. */
   readonly ready: Promise<void>;
+  private readonly renderSamples: Vector3[];
+  private readonly renderNormals: Vector3[];
   private readonly tangents: Vector3[] = [];
   private readonly normals: Vector3[] = [];
   private readonly silverstoneMaterials?: SilverstoneMaterials;
@@ -106,6 +108,13 @@ export class Stage {
       0.35,
     );
     this.samples = this.curve.getPoints(700);
+    // Refine only the visible mesh; gameplay and authored landmark indices
+    // retain their original 700-segment parameterization.
+    this.renderSamples = this.curve.getPoints(2800);
+    this.renderNormals = this.renderSamples.map((_, index) => {
+      const tangent = this.curve.getTangent(index / 2800);
+      return new Vector3(-tangent.z, 0, tangent.x).normalize();
+    });
     let minX = Number.POSITIVE_INFINITY;
     let maxX = Number.NEGATIVE_INFINITY;
     let minZ = Number.POSITIVE_INFINITY;
@@ -296,12 +305,12 @@ export class Stage {
       const b = new Color(colorB);
       const uvScale = Math.max(1, Math.abs(outerOffset - innerOffset));
       let distanceAlongTrack = 0;
-      for (let index = 0; index < this.samples.length; index += 1) {
-        const point = this.samples[index];
-        const normal = this.normals[index];
-        if (index > 0) distanceAlongTrack += point.distanceTo(this.samples[index - 1]);
+      for (let index = 0; index < this.renderSamples.length; index += 1) {
+        const point = this.renderSamples[index];
+        if (index > 0) distanceAlongTrack += point.distanceTo(this.renderSamples[index - 1]);
         [innerOffset, outerOffset].forEach((offset, lateralIndex) => {
-          positions.push(point.x + normal.x * offset, point.y + yOffset, point.z + normal.z * offset);
+          const lateral = this.renderNormals[index].clone().multiplyScalar(offset);
+          positions.push(point.x + lateral.x, point.y + yOffset, point.z + lateral.z);
           const shade = index % 9 < 4 ? a : b;
           colors.push(shade.r, shade.g, shade.b);
           // Use physical ribbon width to keep the texels roughly square.
@@ -309,9 +318,9 @@ export class Stage {
           // of metres and turned its fine aggregate into speed-line streaks.
           uvs.push(distanceAlongTrack / uvScale, lateralIndex);
         });
-        if (index < this.samples.length - 1) {
+        if (index < this.renderSamples.length - 1) {
           const base = index * 2;
-          indices.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+          indices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
         }
       }
       const geometry = new BufferGeometry();
@@ -320,11 +329,14 @@ export class Stage {
       geometry.setAttribute("uv", new BufferAttribute(new Float32Array(uvs), 2));
       geometry.setIndex(indices);
       geometry.computeVertexNormals();
-      const mesh = new Mesh(geometry, surface ?? new MeshStandardMaterial({ vertexColors: true, roughness: 1, side: DoubleSide }));
+      const mesh = new Mesh(geometry, surface ?? new MeshStandardMaterial({ vertexColors: true, roughness: 1, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
       mesh.receiveShadow = true;
       return mesh;
     };
-    this.root.add(makeStrip(-this.roadWidth - 3, this.roadWidth + 3, 0.035, 0x697176, 0x697176, this.silverstoneMaterials?.shoulder));
+    // Shoulder bands stop at the asphalt edge; a full-width layer underneath
+    // the road produces depth flicker at distant, shallow camera angles.
+    this.root.add(makeStrip(-this.roadWidth - 3, -this.roadWidth, 0.075, 0x697176, 0x697176, this.silverstoneMaterials?.shoulder));
+    this.root.add(makeStrip(this.roadWidth, this.roadWidth + 3, 0.075, 0x697176, 0x697176, this.silverstoneMaterials?.shoulder));
     this.root.add(makeStrip(-this.roadWidth, this.roadWidth, 0.075, 0x30363a, 0x30363a, this.silverstoneMaterials?.asphalt));
     this.root.add(makeStrip(this.roadWidth - 0.34, this.roadWidth, 0.092, 0xf0eee6, 0xf0eee6));
     this.root.add(makeStrip(-this.roadWidth, -this.roadWidth + 0.34, 0.092, 0xf0eee6, 0xf0eee6));
@@ -333,8 +345,8 @@ export class Stage {
   private buildSuzukaCrossover(): void {
     const railMaterial = new MeshStandardMaterial({ color: 0xc2cbd0, roughness: 0.55, metalness: 0.32, side: DoubleSide });
     const undersideMaterial = new MeshStandardMaterial({ color: 0x303b43, roughness: 0.8, metalness: 0.1, side: DoubleSide });
-    const bridgeStart = 560;
-    const bridgeEnd = 610;
+    const bridgeStart = 560 * 4;
+    const bridgeEnd = 610 * 4;
     const undersidePositions: number[] = [];
     const undersideIndices: number[] = [];
 
@@ -343,8 +355,8 @@ export class Stage {
     // the sloped asphalt. This range isolates the west-straight crossover and
     // deliberately excludes the naturally elevated Esses.
     for (let index = bridgeStart; index <= bridgeEnd; index += 1) {
-      const point = this.samples[index];
-      const normal = this.normals[index];
+      const point = this.renderSamples[index];
+      const normal = this.renderNormals[index];
       for (const side of [-1, 1]) {
         undersidePositions.push(
           point.x + normal.x * side * (this.roadWidth + 3),
@@ -388,8 +400,8 @@ export class Stage {
       const railPositions: number[] = [];
       const railIndices: number[] = [];
       for (let index = bridgeStart; index <= bridgeEnd; index += 1) {
-        const point = this.samples[index];
-        const normal = this.normals[index];
+        const point = this.renderSamples[index];
+        const normal = this.renderNormals[index];
         const x = point.x + normal.x * side * (this.roadWidth + 1.6);
         const z = point.z + normal.z * side * (this.roadWidth + 1.6);
         railPositions.push(x, point.y + 0.12, z, x, point.y + 1.35, z);
@@ -418,34 +430,51 @@ export class Stage {
       colors: readonly number[],
       stripeLength: number,
       surface?: MeshStandardMaterial,
+      outerHeight = yOffset,
     ): Mesh => {
       const positions: number[] = [];
       const vertexColors: number[] = [];
       const uvs: number[] = [];
-      const indices: number[] = [];
       const palette = colors.map((color) => new Color(color));
-      const uvScale = Math.max(1, Math.abs(outerOffset - innerOffset));
-      let distanceAlongStrip = 0;
-      for (let index = start; index <= end; index += 1) {
-        const point = this.samples[index];
-        const normal = this.normals[index];
-        if (index > start) distanceAlongStrip += point.distanceTo(this.samples[index - 1]);
-        const shade = palette[Math.floor((index - start) / stripeLength) % palette.length];
-        [innerOffset, outerOffset].forEach((offset, lateralIndex) => {
-          positions.push(point.x + normal.x * offset, point.y + yOffset, point.z + normal.z * offset);
-          vertexColors.push(shade.r, shade.g, shade.b);
-          uvs.push(distanceAlongStrip / uvScale, lateralIndex);
-        });
-        if (index < end) {
-          const base = (index - start) * 2;
-          indices.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+      const width = Math.max(1, Math.abs(outerOffset - innerOffset));
+      let distance = 0;
+      // Separate faces preserve hard paint boundaries instead of interpolating
+      // red into white. Stripe lengths are measured in world units.
+      for (let index = start * 4; index < end * 4; index += 1) {
+        const p = this.renderSamples[index];
+        const q = this.renderSamples[index + 1];
+        const length = p.distanceTo(q);
+        let from = 0;
+        while (from < length - 1e-8) {
+          const stripe = Math.floor((distance + from + 1e-7) / stripeLength);
+          const to = Math.min(length, (stripe + 1) * stripeLength - distance);
+          const shade = palette[stripe % palette.length];
+          const corners: Vector3[] = [];
+          for (const along of [from, to]) {
+            const t = along / length;
+            const point = p.clone().lerp(q, t);
+            const inner = this.renderNormals[index].clone().lerp(this.renderNormals[index + 1], t).multiplyScalar(innerOffset);
+            const outer = this.renderNormals[index].clone().lerp(this.renderNormals[index + 1], t).multiplyScalar(outerOffset);
+            corners.push(
+              point.clone().add(inner).add(new Vector3(0, yOffset, 0)),
+              point.clone().add(outer).add(new Vector3(0, outerHeight, 0)),
+            );
+          }
+          const order = outerOffset > innerOffset ? [0, 1, 2, 2, 1, 3] : [0, 2, 1, 2, 3, 1];
+          for (const corner of order) {
+            const point = corners[corner];
+            positions.push(point.x, point.y, point.z);
+            vertexColors.push(shade.r, shade.g, shade.b);
+            uvs.push((distance + (corner < 2 ? from : to)) / width, corner % 2);
+          }
+          from = to;
         }
+        distance += length;
       }
       const geometry = new BufferGeometry();
       geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
       geometry.setAttribute("color", new BufferAttribute(new Float32Array(vertexColors), 3));
       geometry.setAttribute("uv", new BufferAttribute(new Float32Array(uvs), 2));
-      geometry.setIndex(indices);
       geometry.computeVertexNormals();
       const mesh = new Mesh(geometry, surface ?? new MeshStandardMaterial({ vertexColors: true, roughness: 0.88, side: DoubleSide }));
       mesh.receiveShadow = true;
@@ -475,8 +504,14 @@ export class Stage {
       const runoffOutside = (this.roadWidth + (this.id === "suzuka" ? 5.2 : 7.5)) * side;
       const runoffColors = this.id === "suzuka" ? [0x737a77, 0x68726c] : [0x59736a, 0x607a70];
       const runoffSurface = this.id === "suzuka" ? this.silverstoneMaterials?.shoulder : this.silverstoneMaterials?.runoff;
-      this.root.add(buildDetailStrip(start, end, runoffInside, runoffOutside, 0.068, runoffColors, 10, runoffSurface));
-      this.root.add(buildDetailStrip(start, end, inside, outside, 0.12, [0xe9e8de, 0xc9342f], 5));
+      this.root.add(buildDetailStrip(start, end, runoffInside, runoffOutside, 0.085, runoffColors, 10, runoffSurface));
+      const paint = [0xf6f3e9, 0xd83b36];
+      // Low bevels give the kerbs a clear silhouette without blocky steps.
+      const bevelInside = inside + side * 0.3;
+      const bevelOutside = outside - side * 0.3;
+      this.root.add(buildDetailStrip(start, end, inside, bevelInside, 0.095, paint, 4, undefined, 0.20));
+      this.root.add(buildDetailStrip(start, end, bevelInside, bevelOutside, 0.20, paint, 4));
+      this.root.add(buildDetailStrip(start, end, bevelOutside, outside, 0.20, paint, 4, undefined, 0.085));
     });
 
     const lineMaterial = new MeshStandardMaterial({ color: 0xf4f1e8, roughness: 0.82 });

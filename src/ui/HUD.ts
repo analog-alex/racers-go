@@ -63,15 +63,15 @@ export class HUD {
   private lastCountdown = "";
   private lastMinimapTick = -1;
 
-  constructor(private readonly stage: Stage) {
+  constructor(private readonly stage: Stage, private readonly electric = false) {
     this.root.dataset.circuit = stage.id;
-    this.root.setAttribute("aria-label", "Formula telemetry");
+    this.root.setAttribute("aria-label", electric ? "Electric vehicle telemetry" : "Formula telemetry");
     required<HTMLElement>("#stage-code").textContent = stage.definition.code;
     required<HTMLElement>("#stage-name").textContent = stage.definition.region.toUpperCase();
     required<HTMLElement>("#route-distance").textContent = stage.definition.distance;
     this.progressLabel.textContent = "Lap";
     this.surfaceLabel.textContent = "Tyres";
-    required<HTMLElement>("#surface").textContent = "SOFT";
+    required<HTMLElement>("#surface").textContent = electric ? "ROAD" : "SOFT";
     const stored = Number(localStorage.getItem(`${stage.id}-best`));
     if (stored > 0) this.best.textContent = formatTime(stored);
     this.stage.drawMinimap(this.minimap, 0);
@@ -92,7 +92,7 @@ export class HUD {
   update(data: HUDTelemetry): void {
     const kmh = Math.round(Math.abs(data.speed) * 3.6);
     const absolute = Math.abs(data.speed);
-    const gear = absolute < 1 ? "N" : String(Math.min(8, Math.max(1, Math.ceil(absolute / 12))));
+    const gear = absolute < 1 ? "N" : this.electric ? "D" : String(Math.min(8, Math.max(1, Math.ceil(absolute / 12))));
     const speedText = String(kmh);
     if (speedText !== this.lastSpeed) {
       this.lastSpeed = speedText;
@@ -103,7 +103,7 @@ export class HUD {
       this.lastGear = gearText;
       this.gear.textContent = gearText;
     }
-    const surfaceText = data.offroad ? "GRASS" : "SOFT";
+    const surfaceText = data.offroad ? "GRASS" : this.electric ? "ROAD" : "SOFT";
     if (surfaceText !== this.lastSurface) {
       this.lastSurface = surfaceText;
       this.surface.textContent = surfaceText;
@@ -164,12 +164,12 @@ export class HUD {
       this.lastCornerSpeed = cornerSpeed;
       if (this.cornerSpeed) this.cornerSpeed.textContent = cornerSpeed;
     }
-    const drsText = data.offroad ? "OFF" : absolute > 55 ? "ARMED" : "OFF";
+    const drsText = this.electric ? "—" : data.offroad ? "OFF" : absolute > 55 ? "ARMED" : "OFF";
     if (drsText !== this.lastDrs) {
       this.lastDrs = drsText;
       this.drsStatus.textContent = drsText;
     }
-    const drsArmed = !data.offroad && absolute > 55;
+    const drsArmed = !this.electric && !data.offroad && absolute > 55;
     if (drsArmed !== this.lastDrsArmed) {
       this.lastDrsArmed = drsArmed;
       this.drsStatus.classList.toggle("armed", drsArmed);
