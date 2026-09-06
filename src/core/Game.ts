@@ -42,6 +42,7 @@ export class Game {
   private readonly car: RaceCar;
   private readonly speedLines = new SpeedLines();
   private readonly hud: HUD;
+  private readonly carId: CarDefinition["id"];
   private readonly clock = new Clock();
   private readonly right = new Vector3();
   private readonly forward = new Vector3();
@@ -93,6 +94,7 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement, circuit: CircuitDefinition, carDefinition: CarDefinition) {
     this.stage = new Stage(circuit);
+    this.carId = carDefinition.id;
     this.topSpeed = carDefinition.performance?.topSpeed ?? 94;
     this.formulaDynamics = new FormulaDynamics(carDefinition.performance);
     this.hud = new HUD(this.stage, carDefinition.id === "model-y");
@@ -336,7 +338,9 @@ export class Game {
   private readonly onGlobalKey = (event: KeyboardEvent): void => {
     if (event.repeat) return;
     if (event.code === "KeyR") {
-      location.assign(`${location.pathname}?circuit=${this.stage.id}`);
+      // Carry the car through the reload: restarting keeps the chosen car,
+      // exactly as the Retry and Restart stage buttons do.
+      location.assign(`${location.pathname}?car=${this.carId}&circuit=${this.stage.id}`);
       return;
     }
     if (event.code === "Escape" && this.running) {

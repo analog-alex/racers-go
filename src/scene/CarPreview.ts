@@ -83,7 +83,9 @@ export class CarPreview {
     this.lastTime = now;
     this.elapsed += dt;
     this.car.root.rotation.y += dt * 0.34;
-    this.car.update(16, 0, dt, this.elapsed);
+    // The car is parked on a turntable, so it rolls at a standstill: rotating
+    // tyres under a stationary car read as a slipping wheel, not as speed.
+    this.car.update(0, 0, dt, this.elapsed);
     this.render();
   };
 

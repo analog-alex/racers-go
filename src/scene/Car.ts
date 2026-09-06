@@ -82,6 +82,104 @@ const clonePreparedTemplate = (template: PreparedTemplate): { model: Object3D; w
   return { model, wheels, frontWheels };
 };
 
+interface TyreFit {
+  center: Vector3;
+  radius: number;
+  halfWidth: number;
+}
+
+/** Gaussian elimination with partial pivoting; null when the system is degenerate. */
+const solve3 = (matrix: number[][], vector: number[]): number[] | null => {
+  const rows = matrix.map((row, index) => [...row, vector[index]]);
+  for (let column = 0; column < 3; column += 1) {
+    let pivot = column;
+    for (let row = column + 1; row < 3; row += 1) {
+      if (Math.abs(rows[row][column]) > Math.abs(rows[pivot][column])) pivot = row;
+    }
+    if (Math.abs(rows[pivot][column]) < 1e-12) return null;
+    [rows[column], rows[pivot]] = [rows[pivot], rows[column]];
+    for (let row = 0; row < 3; row += 1) {
+      if (row === column) continue;
+      const factor = rows[row][column] / rows[column][column];
+      for (let value = column; value < 4; value += 1) rows[row][value] -= factor * rows[column][value];
+    }
+  }
+  return [rows[0][3] / rows[0][0], rows[1][3] / rows[1][1], rows[2][3] / rows[2][2]];
+};
+
+/**
+ * Meshy welds the upright, wishbones and brake duct into each wheel part, so
+ * the part's bounding box is neither the tyre's axle nor its radius — rolling
+ * it whole spins the suspension and swings the tyre off centre.
+ *
+ * Fit the tyre itself from the part's support function, h(t) = x cos t +
+ * y sin t + radius. Welded hardware can only push a support outwards, so
+ * repeatedly dropping the directions with the largest positive residual
+ * converges on the round tread. The tread's own extent along the axle then
+ * gives the tyre width, which separates the tyre from anything inboard of it.
+ * Vertices arrive as a flat xyz buffer because a part carries tens of
+ * thousands of them.
+ */
+const fitTyre = (vertices: Float64Array, count: number): TyreFit | null => {
+  const samples = 96;
+  let active = Array.from({ length: samples }, (_, index) => {
+    const angle = (index / samples) * Math.PI * 2;
+    return { cos: Math.cos(angle), sin: Math.sin(angle), support: -Infinity };
+  });
+  for (let vertex = 0; vertex < count; vertex += 1) {
+    const x = vertices[vertex * 3];
+    const y = vertices[vertex * 3 + 1];
+    for (const direction of active) {
+      const support = x * direction.cos + y * direction.sin;
+      if (support > direction.support) direction.support = support;
+    }
+  }
+  let circle: number[] | null = null;
+  for (let pass = 0; pass < 4; pass += 1) {
+    let cc = 0;
+    let ss = 0;
+    let cs = 0;
+    let sumCos = 0;
+    let sumSin = 0;
+    let hc = 0;
+    let hs = 0;
+    let sumH = 0;
+    for (const direction of active) {
+      cc += direction.cos * direction.cos;
+      ss += direction.sin * direction.sin;
+      cs += direction.cos * direction.sin;
+      sumCos += direction.cos;
+      sumSin += direction.sin;
+      hc += direction.support * direction.cos;
+      hs += direction.support * direction.sin;
+      sumH += direction.support;
+    }
+    const solution = solve3([[cc, cs, sumCos], [cs, ss, sumSin], [sumCos, sumSin, active.length]], [hc, hs, sumH]);
+    if (!solution) return null;
+    circle = solution;
+    if (pass === 3) break;
+    const residuals = active.map((direction) =>
+      direction.support - (solution[0] * direction.cos + solution[1] * direction.sin + solution[2]));
+    const cutoff = [...residuals].sort((a, b) => a - b)[Math.floor(active.length * 0.6)];
+    const kept = active.filter((_, index) => residuals[index] <= cutoff);
+    if (kept.length >= 16) active = kept;
+  }
+  const [x, y, radius] = circle!;
+  if (!(radius > 0)) return null;
+  const tread: number[] = [];
+  for (let vertex = 0; vertex < count; vertex += 1) {
+    const distance = Math.hypot(vertices[vertex * 3] - x, vertices[vertex * 3 + 1] - y);
+    if (distance > radius * 0.88 && distance < radius * 1.05) tread.push(vertices[vertex * 3 + 2]);
+  }
+  if (tread.length < 32) return null;
+  tread.sort((a, b) => a - b);
+  // Trim the tails so one stray welded edge on the tread cannot widen the tyre.
+  const minZ = tread[Math.floor(tread.length * 0.02)];
+  const maxZ = tread[Math.floor(tread.length * 0.98)];
+  if (!(maxZ > minZ)) return null;
+  return { center: new Vector3(x, y, (minZ + maxZ) / 2), radius, halfWidth: (maxZ - minZ) / 2 };
+};
+
 export interface CarDynamicsFeedback {
   longitudinalG: number;
   lateralG: number;
@@ -326,7 +424,68 @@ export class RaceCar {
       return result;
     };
 
-    const wheelTriangles = new Set(wheelParts.flatMap((component) => component.triangles));
+    const scratch = new Vector3();
+    const triangleCentroid = (triangle: number): Vector3 => {
+      scratch.set(0, 0, 0);
+      for (let corner = 0; corner < 3; corner += 1) {
+        const index = indices.getX(triangle * 3 + corner);
+        scratch.x += positions.getX(index);
+        scratch.y += positions.getY(index);
+        scratch.z += positions.getZ(index);
+      }
+      return scratch.multiplyScalar(1 / 3);
+    };
+
+    // Keep only each part's tyre on the rolling pivot; the upright, wishbones
+    // and brake duct welded to it stay with the static body.
+    const tyres = wheelParts.map((component) => {
+      const seen = new Set<number>();
+      const vertices = new Float64Array(component.triangles.length * 9);
+      let count = 0;
+      for (const triangle of component.triangles) {
+        for (let corner = 0; corner < 3; corner += 1) {
+          const index = indices.getX(triangle * 3 + corner);
+          if (seen.has(index)) continue;
+          seen.add(index);
+          vertices[count * 3] = positions.getX(index);
+          vertices[count * 3 + 1] = positions.getY(index);
+          vertices[count * 3 + 2] = positions.getZ(index);
+          count += 1;
+        }
+      }
+      const boxCenter = component.min.clone().add(component.max).multiplyScalar(0.5);
+      const fallback = {
+        triangles: component.triangles,
+        center: boxCenter,
+        radius: (component.max.y - component.min.y) / 2,
+        sidewall: (component.max.z - component.min.z) / 2,
+      };
+      const fit = fitTyre(vertices, count);
+      if (!fit) return fallback;
+      const depth = fit.halfWidth * 1.08;
+      const triangles = component.triangles.filter((triangle) => {
+        const centroid = triangleCentroid(triangle);
+        return Math.hypot(centroid.x - fit.center.x, centroid.y - fit.center.y) <= fit.radius * 1.05
+          && Math.abs(centroid.z - fit.center.z) <= depth;
+      });
+      // A fit that rejects almost everything did not find a tyre; keep the part.
+      if (triangles.length < component.triangles.length * 0.25) return fallback;
+      // The tyre is widest across its sidewall bulge rather than its tread, so
+      // measure the outboard face over the band the paint arc sits in.
+      const facing = fit.center.z < 0 ? -1 : 1;
+      let sidewall = fit.halfWidth;
+      for (const triangle of triangles) {
+        for (let corner = 0; corner < 3; corner += 1) {
+          const index = indices.getX(triangle * 3 + corner);
+          const distance = Math.hypot(positions.getX(index) - fit.center.x, positions.getY(index) - fit.center.y);
+          if (distance < fit.radius * 0.72 || distance > fit.radius * 0.9) continue;
+          sidewall = Math.max(sidewall, facing * (positions.getZ(index) - fit.center.z));
+        }
+      }
+      return { triangles, center: fit.center, radius: fit.radius, sidewall };
+    });
+
+    const wheelTriangles = new Set(tyres.flatMap((tyre) => tyre.triangles));
     const bodyTriangles = Array.from(
       { length: indices.count / 3 },
       (_, triangle) => triangle,
@@ -344,30 +503,28 @@ export class RaceCar {
     bodyMesh.name = "Generated vehicle body";
     assembly.add(bodyMesh);
 
-    for (const component of wheelParts) {
-      const center = component.min.clone().add(component.max).multiplyScalar(0.5);
+    for (const tyre of tyres) {
       const steeringPivot = new Group();
-      steeringPivot.position.copy(center);
+      steeringPivot.position.copy(tyre.center);
       const rollPivot = new Group();
       rollPivot.userData.rollAxis = "z";
-      const radius = (component.max.y - component.min.y) / 2;
-      rollPivot.userData.radius = radius;
+      rollPivot.userData.radius = tyre.radius;
       // A small sidewall paint arc makes slick tyre rotation readable.
       const marker = new Mesh(
-        new RingGeometry(radius * 0.76, radius * 0.86, 16, 1, 0.2, 0.7),
+        new RingGeometry(tyre.radius * 0.76, tyre.radius * 0.86, 16, 1, 0.2, 0.7),
         new MeshStandardMaterial({ color: 0xd8c485, roughness: 0.9, side: DoubleSide }),
       );
-      marker.position.z = Math.sign(center.z) * ((component.max.z - component.min.z) / 2 + radius * 0.012);
+      marker.position.z = (tyre.center.z < 0 ? -1 : 1) * (tyre.sidewall + tyre.radius * 0.012);
       rollPivot.add(marker);
-      const wheel = new Mesh(makeGeometry(component.triangles), source.material);
-      wheel.position.copy(center).multiplyScalar(-1);
+      const wheel = new Mesh(makeGeometry(tyre.triangles), source.material);
+      wheel.position.copy(tyre.center).multiplyScalar(-1);
       rollPivot.add(wheel);
       steeringPivot.add(rollPivot);
       assembly.add(steeringPivot);
       rollPivot.userData.generatedWheel = true;
-      if (center.x < 0) steeringPivot.userData.generatedFrontWheel = true;
+      if (tyre.center.x < 0) steeringPivot.userData.generatedFrontWheel = true;
       wheels.push(rollPivot);
-      if (center.x < 0) frontWheels.push(steeringPivot);
+      if (tyre.center.x < 0) frontWheels.push(steeringPivot);
     }
     nonIndexed.dispose();
     geometry.dispose();
