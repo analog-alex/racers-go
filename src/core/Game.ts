@@ -40,7 +40,7 @@ export class Game {
   private readonly input = new Input();
   private readonly stage: Stage;
   private readonly car: RaceCar;
-  private readonly speedLines = new SpeedLines();
+  private readonly speedLines: SpeedLines;
   private readonly hud: HUD;
   private readonly carId: CarDefinition["id"];
   private readonly clock = new Clock();
@@ -97,6 +97,7 @@ export class Game {
     this.carId = carDefinition.id;
     this.topSpeed = carDefinition.performance?.topSpeed ?? 94;
     this.formulaDynamics = new FormulaDynamics(carDefinition.performance);
+    this.speedLines = new SpeedLines(this.topSpeed);
     this.hud = new HUD(this.stage, carDefinition.id === "model-y");
     this.startPose = this.stage.startPose();
     this.previousCarPosition = this.startPose.position.clone();
@@ -213,7 +214,7 @@ export class Game {
     this.feedback.slipAngle = this.slipAngle;
     this.feedback.aeroLoad = this.aeroLoad;
     this.car.update(this.speed, this.steering, dt, this.elapsed, this.feedback);
-    this.speedLines.update(this.car.root.position, this.heading, this.speed, dt);
+    this.speedLines.update(this.car.root.position, this.heading, this.speed, this.lateralG, dt);
 
     if (this.raceStarted) this.elapsed += dt;
     const progress = this.progressIndex / (this.stage.samples.length - 1);

@@ -1,0 +1,25 @@
+<!doctype html><head><base href="/"></head><body><pre id="result">Checking wheel animation...</pre><script type="module">
+import {RaceCar} from '/src/scene/Car.ts';
+import {CARS} from '/src/core/Cars.ts';
+import {Vector3} from 'three';
+const results=[];
+const assert=(value,message)=>{if(!value)throw Error(message);};
+try {
+for(const definition of Object.values(CARS)){
+ const a=new RaceCar(definition),b=new RaceCar(definition);await Promise.all([a.loadGeneratedModel(),b.loadGeneratedModel()]);
+ assert(a.wheels.length===4 && a.frontWheels.length===2,definition.name+' missing wheel pivots');
+ const initial=a.wheels.map(w=>w.quaternion.clone());
+ a.update(0,0,1,0);assert(a.wheels.every((w,i)=>w.quaternion.angleTo(initial[i])<1e-6),'Stopped wheels moved');
+ a.update(3,0,.1,.1);b.update(3,0,.05,.05);b.update(3,0,.05,.1);
+ assert(a.wheels.every((w,i)=>w.quaternion.angleTo(b.wheels[i].quaternion)<1e-6),'Rotation depends on frame rate');
+ for(let i=0;i<4;i++){const wheel=a.wheels[i];const radius=wheel.userData.radius*Math.abs(wheel.getWorldScale(new Vector3()).y);assert(Math.abs(wheel.quaternion.angleTo(initial[i])-.3/radius)<1e-6,definition.name+' wheel '+i+' rotation '+wheel.quaternion.angleTo(initial[i])+' expected '+.3/radius);}
+ a.update(-3,0,.1,.2);assert(a.wheels.every((w,i)=>w.quaternion.angleTo(initial[i])<1e-6),'Reverse did not undo forward rotation');
+ a.update(0,1,.1,.3);assert(a.frontWheels.every(w=>Math.abs(w.rotation.y-.38)<1e-6),'Front steering failed');assert(a.wheels.every((w,i)=>w.quaternion.angleTo(initial[i])<1e-6),'Steering altered wheel roll');
+ for(const wheel of a.wheels){if(wheel.userData.radius===undefined)continue;let far=0;for(const child of wheel.children){const p=child.geometry.getAttribute('position');for(let i=0;i<p.count;i++)far=Math.max(far,Math.hypot(p.getX(i)+child.position.x,p.getY(i)+child.position.y));}assert(far<=wheel.userData.radius*1.06,definition.name+' rolling part reaches '+(far/wheel.userData.radius*100).toFixed(1)+'% of the tyre radius; suspension is welded to the spinning wheel');}
+ assert(b.frontWheels.every(w=>Math.abs(w.rotation.y)<1e-6),'Clone steering leaked');
+ a.dispose();b.dispose();const c=new RaceCar(definition);await c.loadGeneratedModel();assert(c.wheels.length===4,'Reload after disposal failed');c.dispose();
+ results.push(definition.name+': four wheels, tyre-only rolling parts, radius-based rotation, stopped/reverse motion, frame-rate independence, steering isolation, clone isolation, reload PASS');
+}
+document.getElementById('result').textContent=results.join('\n');
+}catch(error){document.getElementById('result').textContent='FAIL: '+error.message;console.error(error);}
+</script>
